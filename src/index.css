@@ -1,0 +1,104 @@
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import 'tailwindcss';
+
+@theme inline {
+  --color-navy: #1B3A5C;
+  --color-deep-navy: #12283F;
+  --color-steel: #4A7DA8;
+  --color-ink: #0F2338;
+  --color-fog: #F4F6F8;
+  --color-border: #DCE3EA;
+  --color-success: #1E7A4C;
+  --color-amber: #9A6B00;
+
+  --font-display: 'Sora', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font-body);
+  color: #0F2338;
+  background: #FFFFFF;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+.ledger-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Thin scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: #DCE3EA;
+  border-radius: 2px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Print styles */
+@media print {
+  nav, footer, .chat-widget, .no-print {
+    display: none !important;
+  }
+  body {
+    color: #000;
+    background: #fff;
+  }
+}
+
+/* Focus ring */
+*:focus-visible {
+  outline: 2px solid #4A7DA8;
+  outline-offset: 2px;
+}
+
+/* Global button style */
+.btn-primary {
+  display: inline-block;
+  background: #1B3A5C;
+  color: #fff;
+  border: none;
+  padding: 10px 24px;
+  font-family: 'Sora', sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  text-decoration: none;
+  text-align: center;
+  transition: background 0.15s;
+  border-radius: 0;
+}
+.btn-primary:hover {
+  background: #12283F;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

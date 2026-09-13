@@ -1,0 +1,17 @@
+{
+  "title": "Shield Safe Bank — Convert crypto to dollars",
+  "description": "Convert Bitcoin and USDT to a US dollar balance. Withdraw to your bank account or debit card whenever you want. No fiat deposits. No crypto withdrawals.",
+  "robots": {
+    "index": true
+  },
+  "icons": {
+    "icon": "/shield-safe-bank-logo.png"
+  },
+  "openGraph": {
+    "image": "/shield-safe-bank-logo.png"
+  },
+  "accessibility": {
+    "addBypassLinks": true,
+    "ignoreReducedMotion": false
+  }
+}
