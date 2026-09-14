@@ -68,7 +68,7 @@ function FeeTable({ title, rows }: { title: string; rows: [string, string][] }) 
       <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '20px', color: '#0F2338', marginBottom: '16px', letterSpacing: '-0.01em' }}>{title}</h2>
       <div style={{ border: '1px solid #DCE3EA' }}>
         {rows.map(([label, val], i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderBottom: i < rows.length - 1 ? '1px solid #DCE3EA' : 'none', background: i % 2 === 0 ? '#fff' : '#F4F6F8' }}>
+          <div key={i} className="fee-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderBottom: i < rows.length - 1 ? '1px solid #DCE3EA' : 'none', background: i % 2 === 0 ? '#fff' : '#F4F6F8' }}>
             <span style={{ fontSize: '14px', color: '#374151' }}>{label}</span>
             <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '14px', fontWeight: 600, color: '#0F2338', textAlign: 'right' }}>{val}</span>
           </div>

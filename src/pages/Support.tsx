@@ -68,7 +68,7 @@ export default function Support() {
             </nav>
 
             {/* FAQ */}
-            <div className="col-span-3" style={{ borderLeft: '1px solid #DCE3EA', paddingLeft: '32px' }}>
+            <div className="col-span-3 faq-content" style={{ borderLeft: '1px solid #DCE3EA', paddingLeft: '32px' }}>
               <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '22px', color: '#0F2338', marginBottom: '24px' }}>{active}</h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0, border: '1px solid #DCE3EA' }}>
                 {FAQ[active].map((item, i) => (

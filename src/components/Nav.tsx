@@ -21,7 +21,7 @@ export default function Nav() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2.5 shrink-0" aria-label="Shield Safe Bank home">
-          <BrandMark height={30} />
+          <BrandMark height={40} />
         </Link>
 
         {/* Desktop nav */}

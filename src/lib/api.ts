@@ -115,8 +115,8 @@ export async function register(payload: { email: string; password: string; name:
   return r;
 }
 
-export async function googleAuth(email: string, name: string) {
-  const r = await apiFetch<LoginResult>('/auth/google', { method: 'POST', body: { email, name } });
+export async function googleAuth(email: string, name: string, idToken = '') {
+  const r = await apiFetch<LoginResult>('/auth/google', { method: 'POST', body: { email, name, idToken } });
   if (r.ok && r.data?.token) setToken(r.data.token);
   if (!r.ok && r.offline) {
     const users = readLocalUsers();
@@ -200,7 +200,7 @@ export async function adminLogin(email: string, password: string, totp: string) 
 }
 
 export async function getAdminUsers() {
-  return adminFetch<{ id: string; name: string; email: string; status: string; balance: string; joined: string; kyc: string }[]>('/admin/users');
+  return adminFetch<{ id: string; name: string; email: string; status: string; balance: string; joined: string; lastLogin: string; kyc: string }[]>('/admin/users');
 }
 
 export async function getAdminKyc() {

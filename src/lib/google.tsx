@@ -1,21 +1,83 @@
 import { GOOGLE_CLIENT_ID } from './config';
 
-export function googleSignIn(): Promise<{ ok: boolean; email: string; name: string }> {
-  if (GOOGLE_CLIENT_ID.trim().length > 0) {
-    // Real integration point.
-    // Set GOOGLE_CLIENT_ID in src/lib/config.ts, then a real flow can be wired
-    // here with Google Identity Services: load https://accounts.google.com/gsi/client,
-    // initialize with GOOGLE_CLIENT_ID, exchange the credential ID for a session
-    // via POST /api/auth/google. Fall back to the demo path while unconfigured.
-    return demoSignIn();
+export type GoogleSignInResult = {
+  ok: boolean;
+  idToken?: string;
+  email?: string;
+  name?: string;
+  error?: string;
+};
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (cfg: { client_id: string; callback: (resp: { credential?: string }) => void }) => void;
+          prompt: (hint?: Record<string, unknown>) => void;
+        };
+      };
+    };
   }
-  return demoSignIn();
 }
 
-function demoSignIn(): Promise<{ ok: boolean; email: string; name: string }> {
-  return new Promise((resolve) => {
-    setTimeout(() => resolve({ ok: true, email: 'you@gmail.com', name: 'Demo User' }), 900);
+let scriptPromise: Promise<void> | null = null;
+
+function loadGsi(): Promise<void> {
+  if (scriptPromise) return scriptPromise;
+  if (window.google?.accounts?.id) return Promise.resolve();
+  scriptPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Failed to load Google Sign-In'));
+    document.head.appendChild(s);
   });
+  return scriptPromise;
+}
+
+function decodeJwt(token: string): { email?: string; name?: string } {
+  try {
+    const encoded = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = atob(encoded);
+    return JSON.parse(decodeURIComponent(decoded.split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')));
+  } catch {
+    return {};
+  }
+}
+
+export function googleSignIn(): Promise<GoogleSignInResult> {
+  const clientId = GOOGLE_CLIENT_ID.trim();
+  if (!clientId) {
+    return new Promise(resolve =>
+      setTimeout(() => resolve({ ok: true, idToken: '', email: 'you@gmail.com', name: 'Demo User' }), 900),
+    );
+  }
+  return loadGsi()
+    .then(
+      () =>
+        new Promise<GoogleSignInResult>(resolve => {
+          window.google.accounts.id.initialize({
+            client_id: clientId,
+            callback: resp => {
+              const token = resp.credential || '';
+              const claims = decodeJwt(token);
+              if (!token || !claims.email) {
+                resolve({ ok: false, error: 'Google did not return a valid account.' });
+                return;
+              }
+              resolve({ ok: true, idToken: token, email: claims.email, name: claims.name || '' });
+            },
+          });
+          window.google.accounts.id.prompt();
+        }),
+    )
+    .catch(() => ({ ok: false, error: 'Google sign-in could not be loaded. Check your connection.' }));
+}
+
+export function isGoogleConfigured() {
+  return GOOGLE_CLIENT_ID.trim().length > 0;
 }
 
 export function googleSvg() {

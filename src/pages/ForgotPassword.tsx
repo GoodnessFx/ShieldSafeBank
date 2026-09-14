@@ -20,9 +20,9 @@ export default function ForgotPassword() {
       <div style={{ minHeight: 'calc(100vh - 120px)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F4F6F8', padding: '40px 16px' }}>
         <div style={{ width: '100%', maxWidth: '400px' }}>
           <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-            <BrandMark height={34} />
+            <BrandMark height={44} />
           </div>
-          <div style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '40px' }}>
+          <div className="auth-card" style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '40px' }}>
             {sent ? (
               <>
                 <div style={{ width: '40px', height: '40px', background: '#1E7A4C', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

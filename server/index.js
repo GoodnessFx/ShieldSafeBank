@@ -110,6 +110,7 @@ app.post('/api/auth/register', (req, res) => {
     id: nextId(db,'user'), email, password, name, type: type || 'personal',
     status:'active', balance:0, kycStatus:'pending', joined: new Date().toISOString().slice(0,10),
     emailVerified:false, totpEnabled:false, businessName: businessName || '',
+    lastLogin: new Date().toISOString(),
   };
   db.users.push(user);
   saveDB(db);
@@ -127,19 +128,45 @@ app.post('/api/auth/login', (req, res) => {
   if (user.status === 'suspended') return res.status(403).json({ error:'Account is suspended.' });
   const token = newToken();
   tokens.set(token, user.id);
+  user.lastLogin = new Date().toISOString();
+  saveDB(db);
   res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type } });
 });
 
-app.post('/api/auth/google', (req, res) => {
-  const { email, name } = req.body;
-  let user = db.users.find(u => u.email === email);
+async function verifyGoogleIdToken(idToken) {
+  try {
+    const { OAuth2Client } = await import('google-auth-library');
+    const client = new OAuth2Client();
+    const ticket = await client.verifyIdToken({ idToken, audience: process.env.GOOGLE_CLIENT_ID });
+    return ticket.getPayload() || null;
+  } catch {
+    return null;
+  }
+}
+
+app.post('/api/auth/google', async (req, res) => {
+  const { email, name, idToken } = req.body;
+  let emailToUse = email;
+  let nameToUse = name || 'Google User';
+  if (process.env.GOOGLE_CLIENT_ID && idToken) {
+    const payload = await verifyGoogleIdToken(idToken);
+    if (!payload || !payload.email) return res.status(401).json({ error: 'Invalid Google credential.' });
+    emailToUse = payload.email;
+    nameToUse = payload.name || nameToUse;
+  }
+  if (!emailToUse) return res.status(400).json({ error: 'Email is required.' });
+  let user = db.users.find(u => u.email === emailToUse);
   if (!user) {
     user = {
-      id: nextId(db,'user'), email, password:'', name: name || 'Google User',
+      id: nextId(db,'user'), email: emailToUse, password:'', name: nameToUse,
       type:'personal', status:'active', balance:17760.94, kycStatus:'approved',
       joined: new Date().toISOString().slice(0,10), emailVerified:true, totpEnabled:false,
+      lastLogin: new Date().toISOString(),
     };
     db.users.push(user);
+    saveDB(db);
+  } else {
+    user.lastLogin = new Date().toISOString();
     saveDB(db);
   }
   const token = newToken();
@@ -198,7 +225,7 @@ app.get('/api/admin/users', adminMiddleware, (_, res) => {
   const users = db.users.map(u => ({
     id:u.id, name:u.name, email:u.email,
     status: u.kycStatus === 'approved' ? 'Verified' : u.status === 'suspended' ? 'Suspended' : 'Pending KYC',
-    balance: '$' + u.balance.toFixed(2), joined:u.joined,
+    balance: '$' + u.balance.toFixed(2), joined:u.joined, lastLogin: u.lastLogin || '',
     kyc: u.kycStatus === 'approved' ? 'Approved' : u.kycStatus === 'rejected' ? 'Rejected' : 'In Review',
   }));
   res.json(users);

@@ -125,7 +125,7 @@ export default function Dashboard() {
         {/* Dashboard nav strip */}
         <div style={{ background: '#12283F', borderBottom: '1px solid #0F2338' }}>
           <div className="max-w-6xl mx-auto px-4 sm:px-6 h-11 flex items-center justify-between">
-            <nav style={{ display: 'flex', gap: '24px' }}>
+            <nav className="dash-rail" style={{ display: 'flex', gap: '24px' }}>
               {['Overview', 'Deposit', 'Withdraw', 'History'].map(t => (
                 <a key={t} href={`#${t.toLowerCase()}`} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#A8C4DA', textDecoration: 'none', letterSpacing: '0.04em', transition: 'color 0.12s' }}
                   onMouseEnter={e => { (e.target as HTMLElement).style.color = '#fff'; }}
@@ -141,7 +141,7 @@ export default function Dashboard() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
           {/* Balance card */}
-          <div id="overview" style={{ background: '#1B3A5C', padding: '36px', display: 'grid', gridTemplateColumns: '1fr auto', gap: '20px', alignItems: 'center' }}>
+          <div id="overview" className="dash-balance-card" style={{ background: '#1B3A5C', padding: '36px', display: 'grid', gridTemplateColumns: '1fr auto', gap: '20px', alignItems: 'center' }}>
             <div>
               <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4A7DA8', margin: '0 0 8px' }}>USD Balance</p>
               <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: 'clamp(36px, 5vw, 56px)', fontWeight: 600, color: '#fff', margin: '0 0 4px', letterSpacing: '-0.02em' }}>

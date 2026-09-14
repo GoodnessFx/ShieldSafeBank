@@ -31,7 +31,7 @@ export default function About() {
             </p>
           </div>
 
-          <div style={{ marginTop: '56px', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1px', background: '#DCE3EA' }}>
+          <div className="about-team" style={{ marginTop: '56px', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1px', background: '#DCE3EA' }}>
             {[
               { name: 'Marcus Webb', role: 'Co-founder, Operations' },
               { name: 'Priya Nair', role: 'Co-founder, Engineering' },

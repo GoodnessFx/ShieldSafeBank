@@ -18,9 +18,9 @@ export default function EmailVerification() {
       <div style={{ minHeight: 'calc(100vh - 120px)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F4F6F8', padding: '40px 16px' }}>
         <div style={{ width: '100%', maxWidth: '440px' }}>
           <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-            <BrandMark height={30} />
+            <BrandMark height={38} />
           </div>
-          <div style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '48px 40px', textAlign: 'center' }}>
+          <div className="auth-card" style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '48px 40px', textAlign: 'center' }}>
             <div style={{ width: '56px', height: '56px', background: '#1B3A5C', margin: '0 auto 24px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
                 <rect x="2" y="5" width="20" height="14" rx="0" stroke="#fff" strokeWidth="1.5" />

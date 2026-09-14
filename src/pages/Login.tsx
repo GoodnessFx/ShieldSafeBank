@@ -40,7 +40,7 @@ export default function Login() {
     setError(''); setLoading(true);
     googleSignIn().then(res => {
       if (!res.ok) { setLoading(false); setError('Google sign-in could not be completed.'); return; }
-      googleAuth(res.email, res.name).then(r => {
+      googleAuth(res.email || '', res.name || '', res.idToken || '').then(r => {
         if (!r.ok && !r.offline) { setLoading(false); setError('Google sign-in could not be completed.'); return; }
         localStorage.setItem('ssb_auth', '1');
         nav('/dashboard');
@@ -53,9 +53,9 @@ export default function Login() {
       <title>Log In — Shield Safe Bank</title>
       <div style={{ minHeight: 'calc(100vh - 120px)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F4F6F8', padding: '40px 16px' }}>
         <div style={{ width: '100%', maxWidth: '400px' }}>
-          <div style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '40px' }}>
+          <div className="auth-card" style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '40px' }}>
             <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-              <BrandMark height={34} />
+              <BrandMark height={46} />
             </div>
             <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '24px', color: '#0F2338', margin: '0 0 6px', letterSpacing: '-0.01em' }}>Log in</h1>
             <p style={{ fontSize: '14px', color: '#6B7280', margin: '0 0 28px' }}>

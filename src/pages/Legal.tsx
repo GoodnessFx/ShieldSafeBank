@@ -15,7 +15,7 @@ export default function Legal() {
       <section style={{ background: '#F4F6F8', borderBottom: '1px solid #DCE3EA', padding: '40px 0 0' }}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 800, fontSize: 'clamp(28px, 3.5vw, 44px)', color: '#0F2338', margin: '0 0 24px', letterSpacing: '-0.02em' }}>Legal</h1>
-          <div style={{ display: 'flex', gap: 0 }}>
+          <div className="legal-tabs" style={{ display: 'flex', gap: 0 }}>
             {sections.map(s => (
               <button
                 key={s}

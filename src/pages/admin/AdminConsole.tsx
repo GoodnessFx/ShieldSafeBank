@@ -105,7 +105,7 @@ export default function AdminConsole() {
       </div>
 
       {/* Tab nav */}
-      <div style={{ background: '#12283F', borderBottom: '1px solid #1B3A5C', padding: '0 24px', display: 'flex', gap: '0' }}>
+      <div className="admin-tabs" style={{ background: '#12283F', borderBottom: '1px solid #1B3A5C', padding: '0 24px', display: 'flex', gap: '0' }}>
         {tabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', padding: '12px 20px', background: 'none', border: 'none', borderBottom: tab === t.key ? '2px solid #4A7DA8' : '2px solid transparent', color: tab === t.key ? '#fff' : '#6B7280', cursor: 'pointer', letterSpacing: '0.04em', transition: 'color 0.12s' }}>
@@ -118,7 +118,7 @@ export default function AdminConsole() {
 
         {/* Chat */}
         {tab === 'chat' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 0, border: '1px solid #1B3A5C', height: '600px' }}>
+          <div className="admin-chat" style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 0, border: '1px solid #1B3A5C', height: '600px' }}>
             {/* Thread list */}
             <div style={{ borderRight: '1px solid #1B3A5C', overflowY: 'auto', background: '#12283F' }}>
               {chatThreads.length === 0 ? (
@@ -164,7 +164,7 @@ export default function AdminConsole() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px' }}>
               <thead>
                 <tr style={{ background: '#12283F' }}>
-                  {['ID', 'Name', 'Email', 'Status', 'Balance', 'KYC', 'Joined'].map(h => (
+                  {['ID', 'Name', 'Email', 'Status', 'Balance', 'KYC', 'Joined', 'Last Login'].map(h => (
                     <th key={h} style={{ padding: '10px 16px', textAlign: 'left', color: '#4A7DA8', fontWeight: 600, fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid #1B3A5C', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -183,6 +183,7 @@ export default function AdminConsole() {
                       <span style={{ fontSize: '10px', color: u.kyc === 'Approved' ? '#1E7A4C' : u.kyc === 'Rejected' ? '#DC2626' : '#9A6B00' }}>● {u.kyc}</span>
                     </td>
                     <td style={{ padding: '11px 16px', color: '#6B7280' }}>{u.joined}</td>
+                    <td style={{ padding: '11px 16px', color: '#6B7280' }}>{u.lastLogin ? new Date(u.lastLogin).toLocaleString() : '—'}</td>
                   </tr>
                 ))}
               </tbody>

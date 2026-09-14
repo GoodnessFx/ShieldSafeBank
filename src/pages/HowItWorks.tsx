@@ -40,7 +40,7 @@ export default function HowItWorks() {
               body: `Link a US bank account (ACH or wire) or a debit card. Submit a withdrawal request. ACH withdrawals take 1–3 business days. Wire withdrawals take same day if submitted before 2pm EST. Debit card withdrawals post within minutes. A minimum of $10.00 applies to all withdrawals.`
             },
           ].map((step, i) => (
-            <div key={i} style={{ display: 'flex', gap: '28px', paddingBottom: '52px', marginBottom: '52px', borderBottom: i < 5 ? '1px solid #DCE3EA' : 'none' }}>
+            <div key={i} className="how-step" style={{ display: 'flex', gap: '28px', paddingBottom: '52px', marginBottom: '52px', borderBottom: i < 5 ? '1px solid #DCE3EA' : 'none' }}>
               <div style={{ flexShrink: 0, paddingTop: '4px' }}>
                 <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '13px', color: '#4A7DA8' }}>{step.n}</span>
               </div>

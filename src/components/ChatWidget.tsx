@@ -30,7 +30,7 @@ export default function ChatWidget() {
   return (
     <div className="chat-widget no-print" style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 100 }}>
       {open && (
-        <div style={{ width: '340px', background: '#fff', border: '1px solid #DCE3EA', boxShadow: '0 4px 24px rgba(15,35,56,0.10)', display: 'flex', flexDirection: 'column', marginBottom: '12px', maxHeight: '480px' }}>
+        <div className="chat-popup" style={{ background: '#fff', border: '1px solid #DCE3EA', boxShadow: '0 4px 24px rgba(15,35,56,0.10)', display: 'flex', flexDirection: 'column', marginBottom: '12px', maxHeight: '480px' }}>
           {/* Header */}
           <div style={{ background: '#1B3A5C', padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>

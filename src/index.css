@@ -70,6 +70,147 @@ body {
   }
 }
 
+/* ============================
+   Mobile responsiveness
+   ============================ */
+
+/* Remove column borders when grid stacks to single column */
+@media (max-width: 767px) {
+  .no-col-border > * {
+    border-right: none !important;
+  }
+}
+
+/* Auth / checkout card padding */
+@media (max-width: 639px) {
+  .auth-card,
+  .checkout-card {
+    padding: 24px 20px !important;
+  }
+}
+
+/* Dashboard nav strip: horizontal scroll */
+.dash-rail {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.dash-rail::-webkit-scrollbar {
+  display: none;
+}
+@media (max-width: 639px) {
+  .dash-rail {
+    gap: 16px !important;
+    padding-bottom: 4px;
+  }
+}
+
+/* Dashboard balance card: stack on very small screens */
+@media (max-width: 480px) {
+  .dash-balance-card {
+    grid-template-columns: 1fr !important;
+    padding: 24px !important;
+  }
+}
+
+/* About team: stack on mobile */
+@media (max-width: 639px) {
+  .about-team {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Admin console chat: single column on tablet */
+@media (max-width: 767px) {
+  .admin-chat {
+    grid-template-columns: 1fr !important;
+    height: auto !important;
+  }
+}
+
+/* Admin tab nav: scroll on narrow screens */
+.admin-tabs {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.admin-tabs::-webkit-scrollbar {
+  display: none;
+}
+@media (max-width: 639px) {
+  .admin-tabs button {
+    padding: 12px 14px !important;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+}
+
+/* Chat widget: fit inside viewport */
+.chat-popup {
+  width: 340px;
+  max-width: 340px;
+}
+@media (max-width: 400px) {
+  .chat-popup {
+    width: calc(100vw - 32px) !important;
+    max-width: calc(100vw - 32px) !important;
+  }
+}
+
+/* Support FAQ: top border instead of left on mobile */
+@media (max-width: 767px) {
+  .faq-content {
+    border-left: none !important;
+    padding-left: 0 !important;
+    border-top: 1px solid #DCE3EA !important;
+    padding-top: 24px !important;
+  }
+}
+
+/* Legal tabs: scroll on mobile */
+.legal-tabs {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.legal-tabs::-webkit-scrollbar {
+  display: none;
+}
+@media (max-width: 639px) {
+  .legal-tabs button {
+    padding: 12px 16px !important;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+}
+
+/* Fee table: stack label/value on narrow screens */
+@media (max-width: 500px) {
+  .fee-row {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 4px;
+  }
+  .fee-row span:last-child {
+    text-align: left !important;
+  }
+}
+
+/* HowItWorks step row: reduce gap on mobile */
+@media (max-width: 639px) {
+  .how-step {
+    gap: 16px !important;
+  }
+}
+
+/* Security section: reduce gap on mobile */
+@media (max-width: 639px) {
+  .security-section {
+    gap: 16px !important;
+  }
+}
+
 /* Focus ring */
 *:focus-visible {
   outline: 2px solid #4A7DA8;

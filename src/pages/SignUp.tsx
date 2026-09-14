@@ -19,7 +19,7 @@ export default function SignUp() {
     setError(''); setLoading(true);
     googleSignIn().then(res => {
       if (!res.ok) { setLoading(false); setError('Google sign-in could not be completed.'); return; }
-      googleAuth(res.email, res.name).then(r => {
+      googleAuth(res.email || '', res.name || '', res.idToken || '').then(r => {
         if (!r.ok && !r.offline) { setLoading(false); setError('Google sign-in could not be completed.'); return; }
         setLoading(false);
         nav('/verify-email');
@@ -65,7 +65,7 @@ export default function SignUp() {
       <div style={{ minHeight: 'calc(100vh - 120px)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F4F6F8', padding: '40px 16px' }}>
         <div style={{ width: '100%', maxWidth: '480px' }}>
           <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-            <BrandMark height={30} />
+            <BrandMark height={40} />
           </div>
           {/* Steps */}
           <div style={{ display: 'flex', gap: 0, marginBottom: '24px' }}>
@@ -80,7 +80,7 @@ export default function SignUp() {
             ))}
           </div>
 
-          <div style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '40px' }}>
+          <div className="auth-card" style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '40px' }}>
             {step === 'account' && (
               <>
                 <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '22px', color: '#0F2338', margin: '0 0 20px' }}>Create your account</h1>

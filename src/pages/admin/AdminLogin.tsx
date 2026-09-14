@@ -39,7 +39,7 @@ export default function AdminLogin() {
           <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#374151', margin: 0, letterSpacing: '0.06em' }}>ADMIN CONSOLE — RESTRICTED</p>
         </div>
 
-        <div style={{ background: '#12283F', border: '1px solid #1B3A5C', padding: '36px' }}>
+        <div className="auth-card" style={{ background: '#12283F', border: '1px solid #1B3A5C', padding: '36px' }}>
           {step === 'creds' ? (
             <form onSubmit={handleCreds} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <AField label="Admin email" type="email" value={email} onChange={setEmail} />

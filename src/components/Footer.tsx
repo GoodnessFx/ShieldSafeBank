@@ -1,6 +1,21 @@
-import { Link } from 'react-router';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router';
 
 export default function Footer() {
+  const [taps, setTaps] = useState(0);
+  const nav = useNavigate();
+
+  function handleDot() {
+    const next = taps + 1;
+    setTaps(next);
+    if (next >= 4) {
+      setTaps(0);
+      nav('/xk9-admin-console-7f3a');
+    } else {
+      setTimeout(() => setTaps(0), 2500);
+    }
+  }
+
   return (
     <footer style={{ borderTop: '1px solid #DCE3EA', background: '#F4F6F8', marginTop: 'auto' }}>
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12">
@@ -41,12 +56,19 @@ export default function Footer() {
         </div>
 
         <div style={{ borderTop: '1px solid #DCE3EA', paddingTop: '24px', display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'center' }}>
-          <p style={{ fontSize: '12px', color: '#6B7280', margin: 0 }}>
-            &copy; {new Date().getFullYear()} Shield Safe Bank. Not a licensed money transmitter. Platform for demonstration and investor review.
+<p style={{ fontSize: '12px', color: '#6B7280', margin: 0 }}>
+            &copy; {new Date().getFullYear()} Shield Safe Bank. All rights reserved.
           </p>
           <p style={{ fontSize: '12px', color: '#6B7280', margin: 0, fontFamily: 'IBM Plex Mono, monospace' }}>
-            support@shieldsafebank.com &middot; Mon–Fri 9am–6pm EST
+            support@shieldsafebank.com &middot; Mon&ndash;Fri 9am&ndash;6pm EST
           </p>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: '18px' }}>
+          <button
+            onClick={handleDot}
+            aria-label="Menu"
+            style={{ width: 12, height: 12, borderRadius: '50%', border: 'none', background: '#E2E8F0', cursor: 'pointer', padding: 0 }}
+          />
         </div>
       </div>
     </footer>

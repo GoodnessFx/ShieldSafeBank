@@ -53,7 +53,7 @@ export default function Home() {
           <p style={{ fontSize: '16px', color: '#4A5568', lineHeight: 1.65, maxWidth: '480px', marginBottom: '56px' }}>
             No wire transfers in. No buying crypto from us. You already have crypto. We hold your dollars.
           </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 0, border: '1px solid #DCE3EA' }}>
+          <div className="no-col-border" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 0, border: '1px solid #DCE3EA' }}>
             {[
               { n: '01', heading: 'Deposit crypto', body: "Send BTC or USDT to your unique deposit address. The address is permanent. One address per asset per account." },
               { n: '02', heading: 'Confirmation converts', body: "Once your transaction confirms on-chain, we lock the exchange rate at that moment and credit your USD balance. Not at withdrawal time." },
@@ -108,7 +108,7 @@ export default function Home() {
       {/* Security snapshot */}
       <section style={{ background: '#fff', padding: '80px 0', borderBottom: '1px solid #DCE3EA' }}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="grid md:grid-cols-3 gap-0" style={{ border: '1px solid #DCE3EA' }}>
+          <div className="grid md:grid-cols-3 gap-0 no-col-border" style={{ border: '1px solid #DCE3EA' }}>
             {[
               { heading: 'Cold storage majority', body: "The majority of customer funds are held in cold storage, air-gapped from any network." },
               { heading: 'On-chain monitoring', body: "Every account's deposit address is monitored per-transaction. Anomalies trigger an automatic review hold." },

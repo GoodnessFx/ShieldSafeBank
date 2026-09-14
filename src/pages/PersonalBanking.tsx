@@ -20,7 +20,7 @@ export default function PersonalBanking() {
       <section style={{ padding: '72px 0', background: '#fff', borderBottom: '1px solid #DCE3EA' }}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '28px', color: '#0F2338', marginBottom: '40px', letterSpacing: '-0.01em' }}>What you get</h2>
-          <div className="grid md:grid-cols-2 gap-0" style={{ border: '1px solid #DCE3EA' }}>
+          <div className="grid md:grid-cols-2 gap-0 no-col-border" style={{ border: '1px solid #DCE3EA' }}>
             {[
               { title: 'BTC deposit address', body: 'A permanent Bitcoin deposit address. Send from any wallet or exchange. 3-confirmation requirement.' },
               { title: 'USDT deposit address', body: 'One address for ERC-20 or TRC-20 USDT (selected during setup). Cannot be changed after account opening.' },
@@ -43,7 +43,7 @@ export default function PersonalBanking() {
       <section style={{ padding: '64px 0', background: '#F4F6F8', borderBottom: '1px solid #DCE3EA' }}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '24px', color: '#0F2338', marginBottom: '32px' }}>What is required to open an account</h2>
-          <div className="grid md:grid-cols-3 gap-0" style={{ border: '1px solid #DCE3EA', background: '#fff' }}>
+          <div className="grid md:grid-cols-3 gap-0 no-col-border" style={{ border: '1px solid #DCE3EA', background: '#fff' }}>
             {[
               ['Government-issued ID', 'Passport, national ID, or driver\'s license. Must be valid.'],
               ['Liveness check', 'A brief video selfie matched against your ID. Takes about 90 seconds.'],

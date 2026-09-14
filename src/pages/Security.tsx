@@ -57,7 +57,7 @@ export default function Security() {
 
 function SecuritySection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: 'flex', gap: '32px' }}>
+    <div className="security-section" style={{ display: 'flex', gap: '32px' }}>
       <div style={{ width: '6px', flexShrink: 0, background: '#1B3A5C', alignSelf: 'stretch', maxHeight: '100%' }} />
       <div>
         <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '22px', color: '#0F2338', marginBottom: '16px', letterSpacing: '-0.01em' }}>{title}</h2>
