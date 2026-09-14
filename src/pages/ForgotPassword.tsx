@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { forgotPassword } from '../lib/api';
+import BrandMark from '../components/BrandMark';
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('');
@@ -18,6 +19,9 @@ export default function ForgotPassword() {
       <title>Reset Password — Shield Safe Bank</title>
       <div style={{ minHeight: 'calc(100vh - 120px)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F4F6F8', padding: '40px 16px' }}>
         <div style={{ width: '100%', maxWidth: '400px' }}>
+          <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+            <BrandMark height={34} />
+          </div>
           <div style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '40px' }}>
             {sent ? (
               <>

@@ -69,6 +69,8 @@ export default function Dashboard() {
 
   function logout() {
     localStorage.removeItem('ssb_auth');
+    localStorage.removeItem('ssb_token');
+    localStorage.removeItem('ssb_local_user');
     nav('/');
   }
 

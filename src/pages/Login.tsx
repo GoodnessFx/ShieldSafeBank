@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { googleSignIn, googleSvg } from '../lib/google';
 import { login as apiLogin, googleAuth } from '../lib/api';
+import BrandMark from '../components/BrandMark';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -18,11 +19,8 @@ export default function Login() {
     setError('');
     setLoading(true);
     apiLogin(email, password).then(r => {
-      if (!r.ok && !r.offline) {
-        setLoading(false);
-        setError(r.data && r.data.error ? r.data.error : 'Invalid credentials.');
-        return;
-      }
+      if (!r.ok && r.offline) { setLoading(false); setError('Check your email and password and try again.'); return; }
+      if (!r.ok) { setLoading(false); setError(r.data && r.data.error ? r.data.error : 'Invalid credentials.'); return; }
       setLoading(false);
       setStep('totp');
     });
@@ -56,6 +54,9 @@ export default function Login() {
       <div style={{ minHeight: 'calc(100vh - 120px)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F4F6F8', padding: '40px 16px' }}>
         <div style={{ width: '100%', maxWidth: '400px' }}>
           <div style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '40px' }}>
+            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+              <BrandMark height={34} />
+            </div>
             <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '24px', color: '#0F2338', margin: '0 0 6px', letterSpacing: '-0.01em' }}>Log in</h1>
             <p style={{ fontSize: '14px', color: '#6B7280', margin: '0 0 28px' }}>
               No account? <Link to="/signup" style={{ color: '#1B3A5C', fontWeight: 500 }}>Open one</Link>
@@ -92,9 +93,6 @@ export default function Login() {
               </form>
             )}
           </div>
-          <p style={{ textAlign: 'center', fontSize: '12px', color: '#9CA3AF', marginTop: '20px', fontFamily: 'IBM Plex Mono, monospace' }}>
-            This is a demonstration platform.
-          </p>
         </div>
       </div>
     </>

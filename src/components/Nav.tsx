@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router';
+import BrandMark from './BrandMark';
 
 const links = [
   { to: '/how-it-works', label: 'How It Works' },
@@ -20,10 +21,7 @@ export default function Nav() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2.5 shrink-0" aria-label="Shield Safe Bank home">
-          <ShieldLogo />
-          <span style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '15px', letterSpacing: '-0.01em', color: '#1B3A5C', lineHeight: 1 }}>
-            SHIELD<br />SAFE BANK
-          </span>
+          <BrandMark height={30} />
         </Link>
 
         {/* Desktop nav */}
@@ -88,19 +86,5 @@ export default function Nav() {
         </div>
       )}
     </header>
-  );
-}
-
-function ShieldLogo() {
-  return (
-    <svg width="28" height="32" viewBox="0 0 28 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M14 1L2 6V17C2 23.627 7.373 29.627 14 31C20.627 29.627 26 23.627 26 17V6L14 1Z" fill="#1B3A5C" />
-      <path d="M14 1L2 6V17C2 23.627 7.373 29.627 14 31C20.627 29.627 26 23.627 26 17V6L14 1Z" fill="none" stroke="#4A7DA8" strokeWidth="0.5" />
-      <rect x="11" y="12" width="6" height="7" rx="0.5" fill="none" stroke="#fff" strokeWidth="1.5" />
-      <path d="M11.5 12V10.5C11.5 8.567 13.067 7 15 7V7" stroke="#fff" strokeWidth="1.5" strokeLinecap="square" />
-      <path d="M16.5 12V10.5C16.5 8.567 14.933 7 13 7" stroke="none" />
-      <circle cx="14" cy="15.5" r="1" fill="#fff" />
-      <line x1="14" y1="16.5" x2="14" y2="18" stroke="#fff" strokeWidth="1.2" strokeLinecap="round" />
-    </svg>
   );
 }

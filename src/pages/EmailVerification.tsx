@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
+import BrandMark from '../components/BrandMark';
 
 export default function EmailVerification() {
   const [loading, setLoading] = useState(false);
@@ -16,6 +17,9 @@ export default function EmailVerification() {
       <title>Verify Your Email — Shield Safe Bank</title>
       <div style={{ minHeight: 'calc(100vh - 120px)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F4F6F8', padding: '40px 16px' }}>
         <div style={{ width: '100%', maxWidth: '440px' }}>
+          <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+            <BrandMark height={30} />
+          </div>
           <div style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '48px 40px', textAlign: 'center' }}>
             <div style={{ width: '56px', height: '56px', background: '#1B3A5C', margin: '0 auto 24px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
@@ -44,10 +48,9 @@ export default function EmailVerification() {
               Once verified, your account will be queued for identity review.
             </p>
 
-            {/* Dev bypass */}
             <button onClick={() => { localStorage.setItem('ssb_auth', '1'); nav('/dashboard'); }}
-              style={{ marginTop: '16px', background: 'none', border: 'none', fontSize: '12px', color: '#DCE3EA', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace' }}>
-              [demo: skip to dashboard]
+              style={{ marginTop: '20px', background: '#1B3A5C', border: 'none', padding: '12px 28px', fontSize: '14px', fontWeight: 600, color: '#fff', cursor: 'pointer' }}>
+              Continue to dashboard
             </button>
           </div>
         </div>

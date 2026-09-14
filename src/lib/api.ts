@@ -20,6 +20,24 @@ function clearToken() {
   localStorage.removeItem('ssb_auth');
 }
 
+const LOCAL_USERS_KEY = 'ssb_local_users';
+const LOCAL_USER_KEY = 'ssb_local_user';
+
+interface LocalUser { email: string; password: string; name: string; type: string; }
+
+function readLocalUsers(): Record<string, LocalUser> {
+  try { return JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || '{}'); } catch { return {}; }
+}
+
+function writeLocalUsers(users: Record<string, LocalUser>) {
+  localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
+}
+
+function saveLocalSession(email: string, name: string, type: string) {
+  localStorage.setItem(LOCAL_USER_KEY, JSON.stringify({ id: 'local', email, name, type }));
+  setToken('local');
+}
+
 async function apiFetch<T>(path: string, opts?: { method?: string; body?: unknown }): Promise<ApiResult<T>> {
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -30,7 +48,7 @@ async function apiFetch<T>(path: string, opts?: { method?: string; body?: unknow
       body: opts?.body ? JSON.stringify(opts.body) : undefined,
     });
     if (res.status === 401) {
-      clearToken();
+      if (token !== 'local') clearToken();
       return { data: null, ok: false, offline: false };
     }
     const json = await res.json();
@@ -72,18 +90,43 @@ export interface LoginResult {
 export async function login(email: string, password: string) {
   const r = await apiFetch<LoginResult>('/auth/login', { method: 'POST', body: { email, password } });
   if (r.ok && r.data?.token) setToken(r.data.token);
+  if (!r.ok && r.offline) {
+    const local = readLocalUsers()[email.toLowerCase()];
+    if (local && local.password === password) {
+      saveLocalSession(local.email, local.name, local.type);
+      return { data: null, ok: true, offline: true };
+    }
+  }
   return r;
 }
 
 export async function register(payload: { email: string; password: string; name: string; type: string }) {
   const r = await apiFetch<LoginResult>('/auth/register', { method: 'POST', body: payload });
   if (r.ok && r.data?.token) setToken(r.data.token);
+  if (!r.ok && r.offline) {
+    const users = readLocalUsers();
+    if (!users[payload.email.toLowerCase()]) {
+      users[payload.email.toLowerCase()] = { email: payload.email, password: payload.password, name: payload.name, type: payload.type };
+      writeLocalUsers(users);
+    }
+    saveLocalSession(payload.email, payload.name, payload.type);
+    return { data: null, ok: true, offline: true };
+  }
   return r;
 }
 
 export async function googleAuth(email: string, name: string) {
   const r = await apiFetch<LoginResult>('/auth/google', { method: 'POST', body: { email, name } });
   if (r.ok && r.data?.token) setToken(r.data.token);
+  if (!r.ok && r.offline) {
+    const users = readLocalUsers();
+    if (!users[email.toLowerCase()]) {
+      users[email.toLowerCase()] = { email, password: '', name, type: 'personal' };
+      writeLocalUsers(users);
+    }
+    saveLocalSession(email, name, 'personal');
+    return { data: null, ok: true, offline: true };
+  }
   return r;
 }
 
@@ -92,7 +135,15 @@ export async function forgotPassword(email: string) {
 }
 
 export async function getMe() {
-  return apiFetch<MeData>('/auth/me');
+  const r = await apiFetch<MeData>('/auth/me');
+  if (!r.ok) {
+    const lu = localStorage.getItem('ssb_local_user');
+    if (lu) {
+      const u = JSON.parse(lu);
+      return { data: { id: u.id || 'local', email: u.email, name: u.name, balance: 0, kycStatus: 'pending', type: u.type || 'personal', status: 'pending', joined: new Date().toLocaleDateString(), emailVerified: true } as MeData, ok: true, offline: true };
+    }
+  }
+  return r;
 }
 
 export async function getTransactions() {

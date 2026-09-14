@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { getAdminUsers, getAdminKyc, decideKyc as apiDecideKyc, getAdminTransactions, toggleHold as apiToggleHold, getAdminThreads, getAdminMessages, replyThread } from '../../lib/api';
+import BrandMark from '../../components/BrandMark';
 
 function mapAdminTx(t: { id: string; date: string; user: string; type: string; asset: string; usd: number; statusLabel: string; hold: boolean }) {
   return {
@@ -97,7 +98,7 @@ export default function AdminConsole() {
       {/* Header */}
       <div style={{ background: '#12283F', borderBottom: '1px solid #1B3A5C', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '52px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontWeight: 700, fontSize: '13px', color: '#4A7DA8', letterSpacing: '0.08em' }}>SHIELD SAFE BANK</span>
+          <BrandMark height={18} white />
           <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#374151', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Admin Console</span>
         </div>
         <button onClick={logout} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.06em' }}>LOG OUT</button>

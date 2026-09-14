@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { adminLogin } from '../../lib/api';
+import BrandMark from '../../components/BrandMark';
 
 export default function AdminLogin() {
   const [email, setEmail] = useState('');
@@ -32,7 +33,9 @@ export default function AdminLogin() {
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0F2338', padding: '40px 16px' }}>
       <div style={{ width: '100%', maxWidth: '360px' }}>
         <div style={{ marginBottom: '28px', textAlign: 'center' }}>
-          <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '13px', letterSpacing: '0.12em', color: '#4A7DA8', textTransform: 'uppercase', margin: '0 0 4px' }}>Shield Safe Bank</p>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px' }}>
+            <BrandMark height={30} white />
+          </div>
           <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#374151', margin: 0, letterSpacing: '0.06em' }}>ADMIN CONSOLE — RESTRICTED</p>
         </div>
 

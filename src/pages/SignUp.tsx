@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { googleSignIn, googleSvg } from '../lib/google';
 import { register as apiRegister, googleAuth } from '../lib/api';
+import BrandMark from '../components/BrandMark';
 
 export default function SignUp() {
   const [params] = useSearchParams();
@@ -63,6 +64,9 @@ export default function SignUp() {
       <title>Open Account — Shield Safe Bank</title>
       <div style={{ minHeight: 'calc(100vh - 120px)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F4F6F8', padding: '40px 16px' }}>
         <div style={{ width: '100%', maxWidth: '480px' }}>
+          <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+            <BrandMark height={30} />
+          </div>
           {/* Steps */}
           <div style={{ display: 'flex', gap: 0, marginBottom: '24px' }}>
             {steps.map((s, i) => (
@@ -125,8 +129,8 @@ export default function SignUp() {
                   <SField label="Residential address" type="text" value={form.address} onChange={f('address')} required />
                   <div style={{ background: '#F4F6F8', border: '1px solid #DCE3EA', padding: '16px' }}>
                     <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '14px', color: '#0F2338', margin: '0 0 6px' }}>Government ID and liveness check</p>
-                    <p style={{ fontSize: '13px', color: '#6B7280', margin: '0 0 12px', lineHeight: 1.5 }}>In a real account, you would upload a photo ID and complete a brief video selfie here.</p>
-                    <div style={{ border: '2px dashed #DCE3EA', padding: '24px', textAlign: 'center', color: '#9CA3AF', fontSize: '13px' }}>ID upload (demonstration)</div>
+                    <p style={{ fontSize: '13px', color: '#6B7280', margin: '0 0 12px', lineHeight: 1.5 }}>Upload a government-issued photo ID and complete a brief video selfie.</p>
+                    <div style={{ border: '2px dashed #DCE3EA', padding: '24px', textAlign: 'center', color: '#9CA3AF', fontSize: '13px' }}>ID upload</div>
                   </div>
                   <button type="submit" disabled={loading} className="btn-primary" style={{ padding: '12px', fontSize: '15px', opacity: loading ? 0.6 : 1 }}>
                     {loading ? 'Submitting…' : 'Continue'}
@@ -143,7 +147,7 @@ export default function SignUp() {
                   <div style={{ width: '120px', height: '120px', background: '#1B3A5C', margin: '0 auto 12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <span style={{ color: '#fff', fontSize: '11px', fontFamily: 'IBM Plex Mono, monospace' }}>QR CODE</span>
                   </div>
-                  <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>SSBA-DEMO-2024-TOTP</p>
+                  <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>SSB-2FA-KEY</p>
                 </div>
                 <form onSubmit={handleTotp} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   <SField label="Enter 6-digit code to confirm" type="text" value="" onChange={() => {}} inputMode="numeric" maxLength={6} />
