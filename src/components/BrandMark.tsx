@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import logoUrl from '../assets/logo.png';
+import logoUrl from '../assets/logo-display.png?inline';
 
 export default function BrandMark({ height = 32, white = false }: { height?: number; white?: boolean }) {
   const [failed, setFailed] = useState(false);

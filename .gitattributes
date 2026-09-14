@@ -150,3 +150,6 @@ public/shield-safe-bank-logo.png !filter !diff !merge -text
 shiedsafebanklogo.png !filter !diff !merge -text
 src/assets/logo.png !filter !diff !merge -text
 public/favicon.png !filter !diff !merge -text
+src/assets/logo-display.png !filter !diff !merge -text
+public/favicon-small.png !filter !diff !merge -text
+src/assets/favicon.png !filter !diff !merge -text
