@@ -4,9 +4,6 @@
   "robots": {
     "index": true
   },
-  "icons": {
-    "icon": "/shield-safe-bank-logo.png"
-  },
   "openGraph": {
     "image": "/shield-safe-bank-logo.png"
   },

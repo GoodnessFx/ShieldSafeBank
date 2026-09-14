@@ -148,3 +148,5 @@
 # Deployed web assets must be real git blobs (GitHub Pages cannot serve LFS pointers).
 public/shield-safe-bank-logo.png !filter !diff !merge -text
 shiedsafebanklogo.png !filter !diff !merge -text
+src/assets/logo.png !filter !diff !merge -text
+public/favicon.png !filter !diff !merge -text
