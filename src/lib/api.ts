@@ -1,5 +1,5 @@
 import { API_BASE } from './config';
-import { recordAuth } from './localStore';
+import { recordAuth, getUser, getTransactions as getLocalTxs, addDeposit, addWithdrawal, currentEmail } from './localStore';
 
 interface ApiResult<T> {
   data: T | null;
@@ -157,18 +157,47 @@ export async function getMe() {
     const lu = localStorage.getItem('ssb_local_user');
     if (lu) {
       const u = JSON.parse(lu);
-      return { data: { id: u.id || 'local', email: u.email, name: u.name, balance: 0, kycStatus: 'pending', type: u.type || 'personal', status: 'pending', joined: new Date().toLocaleDateString(), emailVerified: true } as MeData, ok: true, offline: true };
+      const stored = getUser(u.email || '');
+      const status = stored && stored.status === 'verified' ? 'approved' : 'pending';
+      const balance = stored ? stored.balance : 0;
+      return { data: { id: u.id || 'local', email: u.email, name: u.name, balance, kycStatus: status, type: u.type || 'personal', status, joined: stored ? stored.joined : new Date().toLocaleDateString(), emailVerified: true } as MeData, ok: true, offline: true };
     }
   }
   return r;
 }
 
 export async function getTransactions() {
-  return apiFetch<TransactionData[]>('/transactions');
+  const r = await apiFetch<TransactionData[]>('/transactions');
+  if (!r.ok) {
+    const email = currentEmail();
+    if (email) return { data: getLocalTxs(email) as unknown as TransactionData[], ok: true, offline: true };
+  }
+  return r;
+}
+
+export async function submitDeposit(asset: string, usd: number): Promise<ApiResult<{ ok: boolean; message: string; balance: number }>> {
+  const r = await apiFetch<{ ok: boolean; message: string; balance: number }>('/deposits', { method: 'POST', body: { asset, usd } });
+  if (!r.ok) {
+    const email = currentEmail();
+    if (email) {
+      const res = addDeposit(email, asset, usd);
+      if (res.ok) return { data: { ok: true, message: `Deposit of $${usd.toFixed(2)} recorded.`, balance: res.balance }, ok: true, offline: true };
+    }
+  }
+  return r;
 }
 
 export async function requestWithdrawal(amount: number) {
-  return apiFetch<{ ok: boolean; message: string; balance: number }>('/withdrawals', { method: 'POST', body: { amount } });
+  const r = await apiFetch<{ ok: boolean; message: string; balance: number }>('/withdrawals', { method: 'POST', body: { amount } });
+  if (!r.ok) {
+    const email = currentEmail();
+    if (email) {
+      const res = addWithdrawal(email, amount);
+      if (res.ok) return { data: { ok: true, message: `Withdrawal of $${amount.toFixed(2)} requested.`, balance: res.balance }, ok: true, offline: true };
+      return { data: { ok: false, message: res.error || 'Request could not be completed.', balance: 0 }, ok: false, offline: true };
+    }
+  }
+  return r;
 }
 
 export async function getDepositAddresses() {

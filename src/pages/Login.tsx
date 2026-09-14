@@ -7,13 +7,11 @@ import BrandMark from '../components/BrandMark';
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [totp, setTotp] = useState('');
-  const [step, setStep] = useState<'creds' | 'totp'>('creds');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const nav = useNavigate();
 
-  function handleCreds(e: React.FormEvent) {
+  function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     if (!email || !password) { setError('Both fields are required.'); return; }
     setError('');
@@ -22,18 +20,9 @@ export default function Login() {
       if (!r.ok && r.offline) { setLoading(false); setError('Check your email and password and try again.'); return; }
       if (!r.ok) { setLoading(false); setError(r.data && r.data.error ? r.data.error : 'Invalid credentials.'); return; }
       setLoading(false);
-      setStep('totp');
-    });
-  }
-
-  function handleTotp(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
       localStorage.setItem('ssb_auth', '1');
       nav('/dashboard');
-    }, 700);
+    });
   }
 
   function handleGoogle() {
@@ -62,36 +51,26 @@ export default function Login() {
               No account? <Link to="/signup" style={{ color: '#1B3A5C', fontWeight: 500 }}>Open one</Link>
             </p>
 
-            {step === 'creds' ? (
-              <form onSubmit={handleCreds} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <button type="button" onClick={handleGoogle} disabled={loading}
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', border: '1px solid #DCE3EA', background: '#fff', padding: '11px', fontSize: '14px', fontWeight: 500, color: '#0F2338', cursor: 'pointer', transition: 'background 0.15s', opacity: loading ? 0.6 : 1 }}
-                  onMouseEnter={e => { (e.target as HTMLElement).style.background = '#F4F6F8'; }}
-                  onMouseLeave={e => { (e.target as HTMLElement).style.background = '#fff'; }}>
-                  {googleSvg()} Continue with Google
-                </button>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '4px 0' }}>
-                  <div style={{ flex: 1, height: '1px', background: '#DCE3EA' }} />
-                  <span style={{ fontSize: '11px', color: '#9CA3AF', fontFamily: 'IBM Plex Mono, monospace' }}>OR</span>
-                  <div style={{ flex: 1, height: '1px', background: '#DCE3EA' }} />
-                </div>
-                <AuthField label="Email address" type="email" value={email} onChange={setEmail} />
-                <AuthField label="Password" type="password" value={password} onChange={setPassword} />
-                {error && <p style={{ fontSize: '13px', color: '#DC2626', margin: 0 }}>{error}</p>}
-                <button type="submit" disabled={loading} className="btn-primary" style={{ padding: '12px', fontSize: '15px', opacity: loading ? 0.6 : 1 }}>
-                  {loading ? 'Checking…' : 'Continue'}
-                </button>
-                <Link to="/forgot-password" style={{ fontSize: '13px', color: '#4A7DA8', textDecoration: 'none', textAlign: 'center' }}>Forgot password?</Link>
-              </form>
-            ) : (
-              <form onSubmit={handleTotp} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <p style={{ fontSize: '14px', color: '#374151', margin: 0 }}>Enter the 6-digit code from your authenticator app.</p>
-                <AuthField label="Authentication code" type="text" value={totp} onChange={setTotp} inputMode="numeric" maxLength={6} />
-                <button type="submit" disabled={loading} className="btn-primary" style={{ padding: '12px', fontSize: '15px', opacity: loading ? 0.6 : 1 }}>
-                  {loading ? 'Verifying…' : 'Log in'}
-                </button>
-              </form>
-            )}
+            <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <button type="button" onClick={handleGoogle} disabled={loading}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', border: '1px solid #DCE3EA', background: '#fff', padding: '11px', fontSize: '14px', fontWeight: 500, color: '#0F2338', cursor: 'pointer', transition: 'background 0.15s', opacity: loading ? 0.6 : 1 }}
+                onMouseEnter={e => { (e.target as HTMLElement).style.background = '#F4F6F8'; }}
+                onMouseLeave={e => { (e.target as HTMLElement).style.background = '#fff'; }}>
+                {googleSvg()} Continue with Google
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '4px 0' }}>
+                <div style={{ flex: 1, height: '1px', background: '#DCE3EA' }} />
+                <span style={{ fontSize: '11px', color: '#9CA3AF', fontFamily: 'IBM Plex Mono, monospace' }}>OR</span>
+                <div style={{ flex: 1, height: '1px', background: '#DCE3EA' }} />
+              </div>
+              <AuthField label="Email address" type="email" value={email} onChange={setEmail} />
+              <AuthField label="Password" type="password" value={password} onChange={setPassword} />
+              {error && <p style={{ fontSize: '13px', color: '#DC2626', margin: 0 }}>{error}</p>}
+              <button type="submit" disabled={loading} className="btn-primary" style={{ padding: '12px', fontSize: '15px', opacity: loading ? 0.6 : 1 }}>
+                {loading ? 'Checking…' : 'Log in'}
+              </button>
+              <Link to="/forgot-password" style={{ fontSize: '13px', color: '#4A7DA8', textDecoration: 'none', textAlign: 'center' }}>Forgot password?</Link>
+            </form>
           </div>
         </div>
       </div>

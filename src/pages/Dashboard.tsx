@@ -1,20 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../lib/config';
-import { getMe, getTransactions, requestWithdrawal, type MeData, type TransactionData } from '../lib/api';
+import { getMe, getTransactions, requestWithdrawal, submitDeposit, type MeData, type TransactionData } from '../lib/api';
 
 const BTC_ADDR = DEPOSIT_ADDRESSES.BTC;
 const USDT_ADDR = DEPOSIT_ADDRESSES['USDT-ERC20'];
 
-const TRANSACTIONS = [
-  { id: 'T001', date: '2025-09-10', type: 'Deposit', asset: 'BTC', amount: '0.25', rate: '$67,842.50', usd: '$16,875.83', status: 'Completed' },
-  { id: 'T002', date: '2025-09-08', type: 'Withdrawal', asset: 'USD', amount: '', rate: '', usd: '$5,000.00', status: 'Completed' },
-  { id: 'T003', date: '2025-09-05', type: 'Deposit', asset: 'USDT', amount: '2,000', rate: '$0.9998', usd: '$1,999.10', status: 'Completed' },
-  { id: 'T004', date: '2025-09-01', type: 'Withdrawal', asset: 'USD', amount: '', rate: '', usd: '$2,500.00', status: 'Completed' },
-  { id: 'T005', date: '2025-08-28', type: 'Deposit', asset: 'BTC', amount: '0.10', rate: '$64,180.00', usd: '$6,386.01', status: 'Completed' },
-];
+const TRANSACTIONS: ReturnType<typeof mapTx>[] = [];
 
-const FALLBACK_BALANCE = 17760.94;
+const FALLBACK_BALANCE = 0;
 
 function fmtUSD(n: number) {
   return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -65,6 +59,10 @@ export default function Dashboard() {
   const [txs, setTxs] = useState(TRANSACTIONS);
   const [balanceTarget, setBalanceTarget] = useState(FALLBACK_BALANCE);
   const [user, setUser] = useState<MeData | null>(null);
+  const [depositAmount, setDepositAmount] = useState('');
+  const [depositError, setDepositError] = useState('');
+  const [depositSent, setDepositSent] = useState(false);
+  const [dLoading, setDLoading] = useState(false);
   const balance = useCountUp(balanceTarget, 1800);
 
   function logout() {
@@ -87,6 +85,26 @@ export default function Dashboard() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  function handleDeposit(e: React.FormEvent) {
+    e.preventDefault();
+    const amt = parseFloat(depositAmount);
+    if (!depositAmount || isNaN(amt)) { setDepositError('Enter an amount.'); return; }
+    setDepositError('');
+    setDLoading(true);
+    submitDeposit(activeTab === 'btc' ? 'BTC' : 'USDT', amt).then(r => {
+      if (r.ok && r.data) {
+        setBalanceTarget(r.data.balance);
+        setDepositAmount('');
+        setDLoading(false);
+        setDepositSent(true);
+        getTransactions().then(t => { if (t.ok && t.data) setTxs(t.data.map(mapTx)); });
+      } else {
+        setDLoading(false);
+        setDepositError(r.data && r.data.error ? r.data.error : r.data && r.data.message ? r.data.message : 'Deposit could not be recorded.');
+      }
+    });
+  }
 
   function copy(addr: string, key: string) {
     navigator.clipboard.writeText(addr).catch(() => {});
@@ -166,11 +184,11 @@ export default function Dashboard() {
               <div>
                 <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#92400E', margin: '0 0 6px' }}>Verification in progress</p>
                 <p style={{ fontSize: '14px', color: '#78350F', lineHeight: 1.65, margin: 0 }}>
-                  Your identity verification is being reviewed. Deposit addresses will appear here once verification is complete. This usually takes within one business day.
+                  Our team has been notified and will verify your account shortly. You can still deposit below.
                 </p>
               </div>
             </div>
-          ) : (
+          ) : null}
           <div className="grid md:grid-cols-2 gap-6">
             {/* Deposit addresses */}
             <div id="deposit" style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '28px' }}>
@@ -190,6 +208,32 @@ export default function Dashboard() {
                 <AddressBlock addr={BTC_ADDR} network={BTC_NETWORK} onCopy={() => copy(BTC_ADDR, 'btc')} copied={copied === 'btc'} />
               ) : (
                 <AddressBlock addr={USDT_ADDR} network={USDT_NETWORK} onCopy={() => copy(USDT_ADDR, 'usdt')} copied={copied === 'usdt'} />
+              )}
+
+              {depositSent ? (
+                <div style={{ marginTop: '16px', background: '#F0FDF4', border: '1px solid #BBF7D0', padding: '20px' }}>
+                  <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '15px', color: '#15803D', margin: '0 0 6px' }}>Deposit recorded</p>
+                  <p style={{ fontSize: '13px', color: '#166534', margin: 0 }}>
+                    Your balance was credited. The transfer will be confirmed once it lands on-chain.
+                  </p>
+                  <button onClick={() => setDepositSent(false)} style={{ marginTop: '12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#166534', background: 'none', border: '1px solid #BBF7D0', padding: '6px 14px', cursor: 'pointer' }}>Make another deposit</button>
+                </div>
+              ) : (
+                <form onSubmit={handleDeposit} style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div>
+                    <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4A7DA8', display: 'block', marginBottom: '6px' }}>Amount to deposit (USD value)</label>
+                    <div style={{ display: 'flex', border: '1px solid #DCE3EA', alignItems: 'center' }}>
+                      <span style={{ padding: '0 12px', fontFamily: 'IBM Plex Mono, monospace', color: '#6B7280', fontSize: '16px' }}>$</span>
+                      <input type="number" value={depositAmount} onChange={e => setDepositAmount(e.target.value)} min="0" step="0.01" placeholder="0.00"
+                        style={{ flex: 1, border: 'none', padding: '11px 8px 11px 0', fontFamily: 'IBM Plex Mono, monospace', fontSize: '18px', fontWeight: 600, color: '#0F2338', background: 'transparent', outline: 'none' }}
+                        aria-label="Deposit amount in USD" />
+                    </div>
+                  </div>
+                  {depositError && <p style={{ fontSize: '13px', color: '#DC2626', margin: 0, fontWeight: 500 }}>{depositError}</p>}
+                  <button type="submit" disabled={dLoading} style={{ background: '#1B3A5C', color: '#fff', border: 'none', padding: '12px', fontWeight: 600, fontSize: '14px', cursor: 'pointer', transition: 'background 0.15s', opacity: dLoading ? 0.6 : 1 }}>
+                    {dLoading ? 'Recording…' : 'I have sent this amount'}
+                  </button>
+                </form>
               )}
 
               <div style={{ marginTop: '14px', background: '#FFF8E1', border: '1px solid #F59E0B', padding: '10px 14px' }}>
@@ -238,7 +282,6 @@ export default function Dashboard() {
               )}
             </div>
           </div>
-          )}
 
           {/* Transaction history */}
           <div id="history" style={{ background: '#fff', border: '1px solid #DCE3EA' }}>

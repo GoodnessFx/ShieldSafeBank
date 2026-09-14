@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, ChatThread, ChatMessage, StoreUser, ActivityEvent } from '../../lib/localStore';
+import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, verifyUser, ChatThread, ChatMessage, StoreUser, ActivityEvent } from '../../lib/localStore';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
 import BrandMark from '../../components/BrandMark';
 
@@ -56,9 +56,19 @@ export default function AdminConsole() {
     });
   }
 
+  function approve(email: string) {
+    verifyUser(email);
+    reload();
+  }
+
   function logout() { sessionStorage.removeItem('ssb_admin'); nav('/xk9-admin-console-7f3a'); }
 
   useEffect(() => { reload(); }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => reload(), 5000);
+    return () => clearInterval(id);
+  }, []);
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'chat', label: 'Chat Inbox' },
@@ -66,6 +76,8 @@ export default function AdminConsole() {
     { key: 'activity', label: 'Activity' },
     { key: 'deposits', label: 'Deposit Addresses' },
   ];
+
+  const pendingUsers = users.filter(u => u.status === 'pending');
 
   return (
     <div style={{ minHeight: '100vh', background: '#0F2338', color: '#E5E7EB' }}>
@@ -82,13 +94,38 @@ export default function AdminConsole() {
       <div className="admin-tabs" style={{ background: '#12283F', borderBottom: '1px solid #1B3A5C', padding: '0 24px', display: 'flex', gap: '0' }}>
         {tabs.map(t => (
           <button key={t.key} onClick={() => { setTab(t.key); reload(); }}
-            style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', padding: '12px 20px', background: 'none', border: 'none', borderBottom: tab === t.key ? '2px solid #4A7DA8' : '2px solid transparent', color: tab === t.key ? '#fff' : '#6B7280', cursor: 'pointer', letterSpacing: '0.04em', transition: 'color 0.12s' }}>
+            style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', padding: '12px 20px', background: 'none', border: 'none', borderBottom: tab === t.key ? '2px solid #4A7DA8' : '2px solid transparent', color: tab === t.key ? '#fff' : '#6B7280', cursor: 'pointer', letterSpacing: '0.04em', transition: 'color 0.12s', display: 'flex', alignItems: 'center', gap: '6px' }}>
             {t.label}
+            {t.key === 'users' && pendingUsers.length > 0 && (
+              <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, background: '#EAB308', color: '#0F2338', padding: '1px 6px', borderRadius: '8px' }}>{pendingUsers.length}</span>
+            )}
           </button>
         ))}
       </div>
 
-      <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto' }}>
+      <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
+        {pendingUsers.length > 0 && (
+          <div style={{ background: '#12283F', border: '1px solid #EAB308', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 700, color: '#EAB308', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                {pendingUsers.length} account{pendingUsers.length === 1 ? '' : 's'} awaiting verification
+              </span>
+              <button onClick={() => { setTab('users'); }} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#E5E7EB', background: '#1B3A5C', border: '1px solid #1B3A5C', padding: '6px 12px', cursor: 'pointer' }}>VIEW USERS</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {pendingUsers.map(u => (
+                <div key={u.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', border: '1px solid #1B3A5C', padding: '10px 14px', background: '#0F2338' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#E5E7EB', fontWeight: 600, margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name}</p>
+                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{u.email} · signed up {new Date(u.joined).toLocaleString()}</p>
+                  </div>
+                  <button onClick={() => approve(u.email)} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: '#1E7A4C', border: 'none', padding: '8px 16px', cursor: 'pointer', whiteSpace: 'nowrap' }}>VERIFY</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Chat */}
         {tab === 'chat' && (
@@ -146,7 +183,7 @@ export default function AdminConsole() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px' }}>
                 <thead>
                   <tr style={{ background: '#12283F' }}>
-                    {['Name', 'Email', 'Type', 'Last Login', 'Joined'].map(h => (
+                    {['Name', 'Email', 'Type', 'Status', 'Last Login', 'Joined'].map(h => (
                       <th key={h} style={{ padding: '10px 16px', textAlign: 'left', color: '#4A7DA8', fontWeight: 600, fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid #1B3A5C', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -157,6 +194,13 @@ export default function AdminConsole() {
                       <td style={{ padding: '11px 16px', color: '#E5E7EB', fontWeight: 600 }}>{u.name}</td>
                       <td style={{ padding: '11px 16px', color: '#A8C4DA' }}>{u.email}</td>
                       <td style={{ padding: '11px 16px', color: '#E5E7EB', textTransform: 'capitalize' }}>{u.type}</td>
+                      <td style={{ padding: '11px 16px' }}>
+                        {u.status === 'verified' ? (
+                          <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#34D399', whiteSpace: 'nowrap' }}>VERIFIED</span>
+                        ) : (
+                          <button onClick={() => approve(u.email)} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: '#EAB308', border: 'none', padding: '6px 14px', cursor: 'pointer', whiteSpace: 'nowrap' }}>VERIFY</button>
+                        )}
+                      </td>
                       <td style={{ padding: '11px 16px', color: '#6B7280' }}>{new Date(u.lastLogin).toLocaleString()}</td>
                       <td style={{ padding: '11px 16px', color: '#6B7280' }}>{new Date(u.joined).toLocaleString()}</td>
                     </tr>
@@ -178,12 +222,12 @@ export default function AdminConsole() {
               activity.map((a, i) => (
                 <div key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', padding: '14px 20px', borderBottom: i < activity.length - 1 ? '1px solid #1B3A5C' : 'none', background: a.action === 'signup' ? 'rgba(30, 122, 76, 0.06)' : 'transparent' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
-                    <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', padding: '4px 10px', background: a.action === 'signup' ? '#1E7A4C' : '#4A7DA8', color: '#fff' }}>
-                      {a.action === 'signup' ? 'SIGNED UP' : 'LOGGED IN'}
+                    <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', padding: '4px 10px', background: a.action === 'signup' ? '#1E7A4C' : a.action === 'verified' ? '#EAB308' : '#4A7DA8', color: '#fff', whiteSpace: 'nowrap' }}>
+                      {a.action === 'signup' ? 'SIGNED UP' : a.action === 'verified' ? 'VERIFIED' : 'LOGGED IN'}
                     </span>
                     <div style={{ minWidth: 0 }}>
                       <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#E5E7EB', fontWeight: 600, margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name}</p>
-                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{a.email} · via {a.via === 'google' ? 'Google' : 'email'}</p>
+                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{a.email}{a.via === 'admin' ? '' : ` · via ${a.via === 'google' ? 'Google' : 'email'}`}</p>
                     </div>
                   </div>
                   <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', whiteSpace: 'nowrap' }}>{new Date(a.at).toLocaleString()}</span>
