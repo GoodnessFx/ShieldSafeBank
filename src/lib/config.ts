@@ -6,5 +6,5 @@ export const DEPOSIT_ADDRESSES = {
 export const BTC_NETWORK = 'Bitcoin mainnet';
 export const USDT_NETWORK = 'ERC-20 (Ethereum mainnet)';
 
-export const GOOGLE_CLIENT_ID = '';
+export const GOOGLE_CLIENT_ID = '24300395823-ahbmo1pjkvnchlobe1gmf0em88mhmjgt.apps.googleusercontent.com';
 export const API_BASE = '/api';
