@@ -52,6 +52,9 @@ async function apiFetch<T>(path: string, opts?: { method?: string; body?: unknow
       if (token !== 'local') clearToken();
       return { data: null, ok: false, offline: false };
     }
+    if (res.status === 404 || res.status === 405) {
+      return { data: null, ok: false, offline: true };
+    }
     const json = await res.json();
     if (!res.ok) return { data: json as T, ok: false, offline: false };
     return { data: json as T, ok: true, offline: false };
@@ -199,6 +202,9 @@ async function adminFetch<T>(path: string, opts?: { method?: string; body?: unkn
       sessionStorage.removeItem('ssb_admin');
       return { data: null, ok: false, offline: false };
     }
+    if (res.status === 404 || res.status === 405) {
+      return { data: null, ok: false, offline: true };
+    }
     const json = await res.json();
     if (!res.ok) return { data: json as T, ok: false, offline: false };
     return { data: json as T, ok: true, offline: false };
@@ -207,11 +213,11 @@ async function adminFetch<T>(path: string, opts?: { method?: string; body?: unkn
   }
 }
 
-export async function adminLogin(email: string, password: string, totp: string) {
+export async function adminLogin(email: string, password: string, totp = '') {
   const r = await adminFetch<{ token: string }>('/admin/login', { method: 'POST', body: { email, password, totp } });
   if (r.ok && r.data?.token) setAdminToken(r.data.token);
   if (!r.ok && r.offline) {
-    if (email === 'admin@shieldsafebank.com' && password === 'admin1234' && totp === '123456') {
+    if (email === 'admin@shieldsafebank.com' && password === 'admin1234') {
       setAdminToken('local-admin');
       return { data: { token: 'local-admin' }, ok: true, offline: true };
     }

@@ -308,8 +308,8 @@ app.post('/api/admin/simulate-deposit', adminMiddleware, (req, res) => {
 });
 
 app.post('/api/admin/login', (req, res) => {
-  const { email, password, totp } = req.body;
-  if (email === 'admin@shieldsafebank.com' && password === 'admin1234' && totp === '123456') {
+  const { email, password } = req.body;
+  if (email === 'admin@shieldsafebank.com' && password === 'admin1234') {
     const token = newToken();
     adminTokens.set(token, true);
     return res.json({ token });
@@ -320,7 +320,7 @@ app.post('/api/admin/login', (req, res) => {
 const server = app.listen(PORT, () => {
   console.log(`\n  Shield Safe Bank demo server running on http://localhost:${PORT}\n`);
   console.log(`  Demo login:  demo@shieldsafebank.com / demo1234`);
-  console.log(`  Admin login: admin@shieldsafebank.com / admin1234 / TOTP: 123456\n`);
+  console.log(`  Admin login: admin@shieldsafebank.com / admin1234\n`);
 });
 
 process.on('SIGINT', () => { server.close(); process.exit(0); });

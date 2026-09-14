@@ -6,23 +6,16 @@ import BrandMark from '../../components/BrandMark';
 export default function AdminLogin() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [totp, setTotp] = useState('');
-  const [step, setStep] = useState<'creds' | 'totp'>('creds');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const nav = useNavigate();
 
-  function handleCreds(e: React.FormEvent) {
+  function handleLogin(e: React.FormEvent) {
     e.preventDefault();
+    setError('');
     setLoading(true);
-    setTimeout(() => { setLoading(false); setStep('totp'); }, 700);
-  }
-
-  function handleTotp(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    adminLogin(email, password, totp).then(r => {
-      if (!r.ok && !r.offline) { setLoading(false); setError('Invalid admin credentials.'); return; }
+    adminLogin(email, password).then(r => {
+      if (!r.ok) { setLoading(false); setError(r.data && r.data.error ? r.data.error : 'Invalid admin credentials.'); return; }
       sessionStorage.setItem('ssb_admin', '1');
       setLoading(false);
       nav('/xk9-admin-console-7f3a/console');
@@ -40,39 +33,28 @@ export default function AdminLogin() {
         </div>
 
         <div className="auth-card" style={{ background: '#12283F', border: '1px solid #1B3A5C', padding: '36px' }}>
-          {step === 'creds' ? (
-            <form onSubmit={handleCreds} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <AField label="Admin email" type="email" value={email} onChange={setEmail} />
-              <AField label="Password" type="password" value={password} onChange={setPassword} />
-              {error && <p style={{ fontSize: '13px', color: '#F87171', margin: 0 }}>{error}</p>}
-              <button type="submit" disabled={loading}
-                style={{ background: '#4A7DA8', color: '#fff', border: 'none', padding: '12px', fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '13px', cursor: 'pointer', letterSpacing: '0.04em', opacity: loading ? 0.6 : 1 }}>
-                {loading ? 'CHECKING…' : 'CONTINUE'}
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={handleTotp} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#A8C4DA', margin: 0 }}>TOTP code required for admin access.</p>
-              <AField label="Authenticator code" type="text" value={totp} onChange={setTotp} inputMode="numeric" maxLength={6} />
-              <button type="submit" disabled={loading}
-                style={{ background: '#4A7DA8', color: '#fff', border: 'none', padding: '12px', fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '13px', cursor: 'pointer', opacity: loading ? 0.6 : 1 }}>
-                {loading ? 'VERIFYING…' : 'AUTHENTICATE'}
-              </button>
-            </form>
-          )}
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <AField label="Admin email" type="email" value={email} onChange={setEmail} autoComplete="username" />
+            <AField label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password" />
+            {error && <p style={{ fontSize: '13px', color: '#F87171', margin: 0 }}>{error}</p>}
+            <button type="submit" disabled={loading}
+              style={{ background: '#4A7DA8', color: '#fff', border: 'none', padding: '12px', fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '13px', cursor: 'pointer', letterSpacing: '0.04em', opacity: loading ? 0.6 : 1 }}>
+              {loading ? 'SIGNING IN…' : 'LOG IN'}
+            </button>
+          </form>
         </div>
       </div>
     </div>
   );
 }
 
-function AField({ label, type, value, onChange, inputMode, maxLength }: {
-  label: string; type: string; value: string; onChange: (v: string) => void; inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']; maxLength?: number;
+function AField({ label, type, value, onChange, autoComplete }: {
+  label: string; type: string; value: string; onChange: (v: string) => void; autoComplete?: string;
 }) {
   return (
     <div>
       <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase', color: '#4A7DA8', display: 'block', marginBottom: '6px' }}>{label}</label>
-      <input type={type} value={value} onChange={e => onChange(e.target.value)} inputMode={inputMode} maxLength={maxLength}
+      <input type={type} value={value} onChange={e => onChange(e.target.value)} autoComplete={autoComplete}
         style={{ width: '100%', border: '1px solid #1B3A5C', padding: '10px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '14px', color: '#fff', background: '#0F2338', outline: 'none', boxSizing: 'border-box' }} />
     </div>
   );

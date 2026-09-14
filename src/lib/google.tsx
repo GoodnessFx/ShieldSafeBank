@@ -58,19 +58,28 @@ export function googleSignIn(): Promise<GoogleSignInResult> {
     .then(
       () =>
         new Promise<GoogleSignInResult>(resolve => {
-          window.google.accounts.id.initialize({
-            client_id: clientId,
-            callback: resp => {
-              const token = resp.credential || '';
-              const claims = decodeJwt(token);
-              if (!token || !claims.email) {
-                resolve({ ok: false, error: 'Google did not return a valid account.' });
-                return;
-              }
-              resolve({ ok: true, idToken: token, email: claims.email, name: claims.name || '' });
-            },
-          });
-          window.google.accounts.id.prompt();
+          const timeout = setTimeout(() => {
+            resolve({ ok: false, error: 'Google sign-in timed out. Add this site URL to Google Cloud Console as an authorized origin.' });
+          }, 20000);
+          try {
+            window.google.accounts.id.initialize({
+              client_id: clientId,
+              callback: resp => {
+                clearTimeout(timeout);
+                const token = resp.credential || '';
+                const claims = decodeJwt(token);
+                if (!token || !claims.email) {
+                  resolve({ ok: false, error: 'Google did not return a valid account.' });
+                  return;
+                }
+                resolve({ ok: true, idToken: token, email: claims.email, name: claims.name || '' });
+              },
+            });
+            window.google.accounts.id.prompt();
+          } catch (err) {
+            clearTimeout(timeout);
+            resolve({ ok: false, error: 'Google sign-in could not start. Check the console setup for this Client ID.' });
+          }
         }),
     )
     .catch(() => ({ ok: false, error: 'Google sign-in could not be loaded. Check your connection.' }));
