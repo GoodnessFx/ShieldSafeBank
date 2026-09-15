@@ -17,10 +17,15 @@ export const GOOGLE_CLIENT_ID = '24300395823-ahbmo1pjkvnchlobe1gmf0em88mhmjgt.ap
 
 /**
  * Where the shared backend lives.
- *   • dev / preview  → '/api' (Vite proxies it to the local server)
- *   • production     → set VITE_API_BASE to the hosted server URL, e.g.
- *                      https://shieldsafebank-api.onrender.com
+ *   • localhost      → '/api' (Vite proxies it to the local server)
+ *   • deployed       → the hosted backend URL below
+ *   • override       → set VITE_API_BASE at build time (wins over both)
+ *
  * Without a reachable backend the app falls back to per-browser storage, which
  * is why chats from other devices would not be visible.
  */
-export const API_BASE = (import.meta.env?.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') || '/api';
+const HOSTED_API_BASE = 'https://shieldsafebank-api.onrender.com';
+const envBase = (import.meta.env?.VITE_API_BASE as string | undefined)?.replace(/\/$/, '');
+const isLocalHost = typeof window !== 'undefined'
+  && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
+export const API_BASE = envBase || (isLocalHost ? '/api' : HOSTED_API_BASE);

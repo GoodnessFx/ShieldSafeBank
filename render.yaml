@@ -17,4 +17,4 @@ services:
     envVars:
       - key: DATA_DIR
         value: /var/data
-    healthCheckPath: /api/deposit-addresses
+    healthCheckPath: /api/health

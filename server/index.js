@@ -146,6 +146,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Public health check for hosting platforms (Render, Railway, uptime monitors).
+// Deliberately requires no auth so deploys are never marked unhealthy.
+app.get('/api/health', (_, res) => {
+  res.json({ ok: true, service: 'shieldsafebank-api', time: new Date().toISOString() });
+});
+
 let db = loadDB();
 const tokens = new Map();
 const adminTokens = new Map();
