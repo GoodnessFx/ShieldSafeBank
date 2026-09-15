@@ -1,13 +1,16 @@
 import express from 'express';
 import cors from 'cors';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const DATA_PATH = join(__dirname, 'data', 'store.json');
+// Data directory can be pointed at a mounted persistent disk in production
+// (for example Render/Railway), so the store survives restarts and deploys.
+const DATA_DIR = process.env.DATA_DIR || join(__dirname, 'data');
+const DATA_PATH = join(DATA_DIR, 'store.json');
 const PORT = process.env.PORT || 4000;
 
 const BTC_ADDR = 'bc1q4ulqydnrstew9hr2dkjaey5he2j2zyj83475mc';
@@ -56,6 +59,7 @@ const SEED = {
 };
 
 function loadDB() {
+  mkdirSync(DATA_DIR, { recursive: true });
   if (!existsSync(DATA_PATH)) {
     const seed = normalizeDB(SEED);
     writeFileSync(DATA_PATH, JSON.stringify(seed, null, 2));

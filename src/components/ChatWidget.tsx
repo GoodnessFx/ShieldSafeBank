@@ -29,13 +29,38 @@ export default function ChatWidget() {
 
   // Messages live on the shared server (so they reach the admin on any device);
   // if the server is offline we fall back to the browser's local copy.
-  function load() {
+  //
+  // Recovery: a message written while no backend was reachable only ever existed
+  // in that browser. When the server IS reachable we upload anything the server
+  // is missing, so messages like that are never lost.
+  function messageKey(m: { text: string; time?: string; at?: string }) {
+    return `${m.at || m.time || ''}|${m.text}`;
+  }
+
+  function syncLocalToServer(who: { id: string; user: string; email: string }, serverMsgs: ChatMessage[]): boolean {
+    const localMsgs = getThreadMessages(who.id);
+    if (localMsgs.length === 0) return false;
+    const serverKeys = new Set(serverMsgs.map(messageKey));
+    const missing = localMsgs.filter(m => !serverKeys.has(messageKey(m)));
+    for (const m of missing) sendChatMessage(m.text).catch(() => null);
+    return missing.length > 0;
+  }
+
+  async function load() {
     const who = chatIdentity();
     if (!who.email) return;
-    getMyChatThread().then(r => {
-      if (r.ok && r.data) applyMessages(r.data.messages);
-      else applyMessages(getThreadMessages(who.id));
-    });
+    try {
+      const r = await getMyChatThread();
+      if (r.ok && r.data) {
+        if (syncLocalToServer(who, r.data.messages)) {
+          const again = await getMyChatThread();
+          if (again.ok && again.data) { applyMessages(again.data.messages); return; }
+        }
+        applyMessages(r.data.messages);
+        return;
+      }
+    } catch { /* fall back below */ }
+    applyMessages(getThreadMessages(who.id));
   }
 
   function openChat() {
