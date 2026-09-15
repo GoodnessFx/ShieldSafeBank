@@ -1,12 +1,22 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, type ChatThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
-import { decideKyc, getAdminKyc } from '../../lib/api';
+import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance } from '../../lib/api';
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
 import BrandMark from '../../components/BrandMark';
 
 type Tab = 'chat' | 'users' | 'activity' | 'deposits';
+
+/** A row shown in the admin Users tab. Local accounts carry a full record; a
+ * user that only exists on the server side is merged in so the admin never
+ * misses anyone who has signed up. `serverId` links a row to its server record. */
+type AdminUserRow = StoreUser & { serverId?: string };
+
+function parseServerBalance(value: string): number {
+  const n = parseFloat(String(value || '').replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
 
 export default function AdminConsole() {
   const nav = useNavigate();
@@ -15,7 +25,7 @@ export default function AdminConsole() {
   const [chatInput, setChatInput] = useState('');
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [users, setUsers] = useState<StoreUser[]>([]);
+  const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [kycQueue, setKycQueue] = useState<KycItem[]>([]);
   const [verifying, setVerifying] = useState<string>('');
@@ -24,8 +34,39 @@ export default function AdminConsole() {
   const [editingBalance, setEditingBalance] = useState<string | null>(null);
   const [balanceInput, setBalanceInput] = useState('');
 
-  function reload() {
-    setUsers(getUsers());
+  async function reload() {
+    // Everyone who has signed up locally, combined with anyone stored on the
+    // server. Local accounts win on a matching email; server accounts are the
+    // only ones with a serverId so an admin edit can also apply server-side.
+    const local = getUsers();
+    let remote: AdminUserRow[] = [];
+    try {
+      const sr = await getAdminUsers();
+      if (sr.ok && sr.data) {
+        remote = sr.data.map(m => ({
+          email: m.email,
+          name: m.name,
+          type: 'personal',
+          joined: m.joined || '',
+          lastLogin: m.lastLogin || '',
+          status: m.kyc === 'Approved' || m.status === 'Verified' ? 'verified' : 'pending',
+          balance: parseServerBalance(m.balance),
+          accountNumber: m.accountNumber || '',
+          serverId: m.id,
+        }));
+      }
+    } catch {
+      remote = [];
+    }
+    const byEmail = new Map<string, AdminUserRow>();
+    for (const r of remote) byEmail.set(r.email.toLowerCase(), r);
+    for (const l of local) {
+      const key = l.email.toLowerCase();
+      const ex = byEmail.get(key);
+      byEmail.set(key, ex && ex.serverId ? { ...l, serverId: ex.serverId } : l);
+    }
+    setUsers(Array.from(byEmail.values()));
+
     setActivity(getActivity());
     setKycQueue(getKycQueue());
     setThreads(getThreads());
@@ -62,6 +103,13 @@ export default function AdminConsole() {
       setCopied(key);
       setTimeout(() => setCopied(''), 1500);
     });
+  }
+
+  function saveBalance(u: AdminUserRow, val: number) {
+    if (isNaN(val) || val < 0) return;
+    updateUserBalance(u.email, val);
+    if (u.serverId) setAdminUserBalance(u.serverId, val).catch(() => null);
+    reload();
   }
 
   function approve(email: string) {
@@ -269,11 +317,7 @@ export default function AdminConsole() {
                               autoFocus
                               onKeyDown={e => {
                                 if (e.key === 'Enter') {
-                                  const val = parseFloat(balanceInput);
-                                  if (!isNaN(val) && val >= 0) {
-                                    updateUserBalance(u.email, val);
-                                    reload();
-                                  }
+                                  saveBalance(u, parseFloat(balanceInput));
                                   setEditingBalance(null);
                                   setBalanceInput('');
                                 } else if (e.key === 'Escape') {
@@ -284,11 +328,7 @@ export default function AdminConsole() {
                             />
                             <button
                               onClick={() => {
-                                const val = parseFloat(balanceInput);
-                                if (!isNaN(val) && val >= 0) {
-                                  updateUserBalance(u.email, val);
-                                  reload();
-                                }
+                                saveBalance(u, parseFloat(balanceInput));
                                 setEditingBalance(null);
                                 setBalanceInput('');
                               }}

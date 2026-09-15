@@ -13,8 +13,5 @@ export const USDT_NETWORK = 'ERC-20 (Ethereum mainnet)';
 export const BANK_NAME = 'Shield Safe Bank';
 export const ACCOUNT_NUMBER_PREFIX = BANK_NAME;
 
-/** Every account opens with at least this much in USD. */
-export const WELCOME_CREDIT_USD = 10;
-
 export const GOOGLE_CLIENT_ID = '24300395823-ahbmo1pjkvnchlobe1gmf0em88mhmjgt.apps.googleusercontent.com';
 export const API_BASE = '/api';

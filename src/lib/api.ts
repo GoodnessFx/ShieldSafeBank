@@ -324,7 +324,7 @@ export async function adminLogin(email: string, password: string, totp = ''): Pr
 }
 
 export async function getAdminUsers() {
-  return adminFetch<{ id: string; name: string; email: string; status: string; balance: string; joined: string; lastLogin: string; kyc: string }[]>('/admin/users');
+  return adminFetch<{ id: string; name: string; email: string; status: string; balance: string; joined: string; lastLogin: string; kyc: string; accountNumber?: string }[]>('/admin/users');
 }
 
 export async function getAdminKyc() {
@@ -372,6 +372,10 @@ export async function replyThread(threadId: string, text: string) {
 
 export async function simulateDeposit(userId: string, asset: string, amount: number) {
   return adminFetch<{ ok: boolean; usd: number; balance: number }>('/admin/simulate-deposit', { method: 'POST', body: { userId, asset, amount } });
+}
+
+export async function setAdminUserBalance(userId: string, balance: number) {
+  return adminFetch<{ ok: boolean; balance: number }>(`/admin/users/${userId}/balance`, { method: 'POST', body: { balance } });
 }
 
 export { clearToken, setToken };

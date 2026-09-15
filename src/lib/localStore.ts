@@ -1,4 +1,4 @@
-import { ACCOUNT_NUMBER_PREFIX, WELCOME_CREDIT_USD } from './config';
+import { ACCOUNT_NUMBER_PREFIX } from './config';
 
 export interface StoreUser {
   email: string;
@@ -11,8 +11,6 @@ export interface StoreUser {
   accountNumber: string;
   /** Set when an admin edits the balance by hand. Admin figures are never overwritten automatically. */
   adminAdjusted?: boolean;
-  /** Set once the opening credit has been applied, so it is applied exactly once. */
-  welcomeCreditApplied?: boolean;
   /** Set once the seeded opening balance has been applied. */
   seedBalanceApplied?: boolean;
 }
@@ -134,39 +132,13 @@ function txDate(): string {
   return new Date(nowIso()).toLocaleString([], { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-function openingCreditTx(): LocalTx {
-  return {
-    id: uid('t'),
-    date: txDate(),
-    type: 'deposit',
-    asset: 'USD',
-    amount: WELCOME_CREDIT_USD.toFixed(2),
-    rate: 1,
-    usd: WELCOME_CREDIT_USD,
-    status: 'Cleared',
-  };
-}
-
-/**
- * Every account gets one opening credit so a freshly opened account is never
- * empty. It is a floor, not a top-up: an existing or admin-set balance is never
- * reduced. Returns true when the balance actually changed.
- */
-function applyOpeningCredit(user: StoreUser): boolean {
-  if (user.welcomeCreditApplied) return false;
-  const before = toNumber(user.balance);
-  user.balance = roundMoney(Math.max(before, WELCOME_CREDIT_USD));
-  user.welcomeCreditApplied = true;
-  return user.balance > before;
-}
-
 const SEEDED_ACCOUNT = { email: 'Guera8692@gmail.com', name: 'Michelle Ramirez', type: 'personal' };
 const SEEDED_OPENING_BALANCE = 10000;
 
 /**
  * Seeds the launch account on first load and keeps every stored account valid:
- * a full-name account number, and the opening credit applied once. Balances an
- * admin has edited are left exactly as the admin left them.
+ * a full-name account number. Balances an admin has edited are left exactly as
+ * the admin left them. No automatic credit is given — accounts open at zero.
  */
 (function seedMichelleRamirez() {
   const users = read<Record<string, StoreUser>>(USERS_KEY, {});
@@ -183,7 +155,6 @@ const SEEDED_OPENING_BALANCE = 10000;
       status: 'verified',
       balance: SEEDED_OPENING_BALANCE,
       accountNumber: generateAccountNumber(),
-      welcomeCreditApplied: true,
       seedBalanceApplied: true,
     };
     changed = true;
@@ -208,11 +179,6 @@ const SEEDED_OPENING_BALANCE = 10000;
     ) {
       user.balance = SEEDED_OPENING_BALANCE;
       user.seedBalanceApplied = true;
-      changed = true;
-    }
-
-    if (applyOpeningCredit(user)) {
-      pushTx(oid, openingCreditTx());
       changed = true;
     }
   }
@@ -256,11 +222,6 @@ export function ensureAccount(email: string, name = '', type = 'personal'): Stor
     changed = true;
   }
 
-  if (applyOpeningCredit(user)) {
-    pushTx(oid, openingCreditTx());
-    changed = true;
-  }
-
   users[oid] = user;
   if (changed) write(USERS_KEY, users);
   return user;
@@ -282,9 +243,8 @@ export function recordAuth(email: string, name: string, action: 'signup' | 'logi
       balance: toNumber(prev.balance),
       accountNumber: normalizeAccountNumber(prev.accountNumber),
     };
-    // An account that never received its opening credit gets it on sign-in.
-    if (applyOpeningCredit(users[oid])) pushTx(oid, openingCreditTx());
   } else {
+    // New accounts start at zero. Balances are set by the admin when they want.
     users[oid] = {
       email,
       name,
@@ -292,11 +252,9 @@ export function recordAuth(email: string, name: string, action: 'signup' | 'logi
       joined: nowIso(),
       lastLogin: nowIso(),
       status: 'pending',
-      balance: WELCOME_CREDIT_USD,
+      balance: 0,
       accountNumber: generateAccountNumber(),
-      welcomeCreditApplied: true,
     };
-    pushTx(oid, openingCreditTx());
   }
 
   write(USERS_KEY, users);
@@ -315,9 +273,8 @@ export function updateUserBalance(email: string, newBalance: number): StoreUser 
   if (!user) return null;
   user.balance = Math.round(newBalance * 100) / 100;
   // Flag admin edits so the stored figure is authoritative and is never
-  // overwritten by the seed or by an opening credit.
+  // overwritten by the seed.
   user.adminAdjusted = true;
-  user.welcomeCreditApplied = true;
   users[oid] = user;
   write(USERS_KEY, users);
   return user;

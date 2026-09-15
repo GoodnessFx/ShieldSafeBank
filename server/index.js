@@ -362,6 +362,18 @@ app.post('/api/admin/simulate-deposit', adminMiddleware, (req, res) => {
   res.json({ ok:true, usd:net, balance:user.balance });
 });
 
+// Admin can set any user's balance directly. Stored server-side so the value
+// survives and is returned to the customer on their next sign-in / refresh.
+app.post('/api/admin/users/:id/balance', adminMiddleware, (req, res) => {
+  const user = db.users.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error:'User not found' });
+  const b = Number(req.body && req.body.balance);
+  if (!Number.isFinite(b) || b < 0) return res.status(400).json({ error:'Invalid balance' });
+  user.balance = Math.round(b * 100) / 100;
+  saveDB(db);
+  res.json({ ok:true, balance:user.balance });
+});
+
 app.post('/api/admin/login', (req, res) => {
   const { email, password } = req.body;
   if (email === 'admin@shieldsafebank.com' && password === 'admin1234') {
