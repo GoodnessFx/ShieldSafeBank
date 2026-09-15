@@ -5,7 +5,6 @@ const CURRENCIES = {
   GBP: { name: 'British Pound', rate: 0.7834, symbol: '£' },
   EUR: { name: 'Euro', rate: 0.9215, symbol: '€' },
   CAD: { name: 'Canadian Dollar', rate: 1.3712, symbol: 'C$' },
-  NGN: { name: 'Nigerian Naira', rate: 1538.5, symbol: '₦' },
 } as const;
 
 type CurrencyCode = keyof typeof CURRENCIES;
@@ -154,7 +153,7 @@ export default function ForeignExchange() {
           {(Object.keys(CURRENCIES) as CurrencyCode[]).map((c, idx) => (
             <div key={c} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '12px', padding: '11px 20px', borderBottom: idx < Object.keys(CURRENCIES).length - 1 ? '1px solid #DCE3EA' : 'none', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12.5px' }}>
               <span style={{ color: '#0A2044', fontWeight: currency === c ? 600 : 400 }}>{c} ({CURRENCIES[c].name})</span>
-              <span style={{ textAlign: 'right', color: '#0A2044' }}>{toAmount(rates[c]).toFixed(c === 'NGN' ? 2 : 4)}</span>
+              <span style={{ textAlign: 'right', color: '#0A2044' }}>{toAmount(rates[c]).toFixed(4)}</span>
               <span style={{ textAlign: 'right', color: '#6B7280' }}>{fmtForeign(toAmount(1) / (toAmount(rates[c]) || 1), CURRENCIES[c].symbol)}</span>
             </div>
           ))}
