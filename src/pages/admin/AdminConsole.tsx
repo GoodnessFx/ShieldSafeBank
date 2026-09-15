@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, verifyUser, ChatThread, ChatMessage, StoreUser, ActivityEvent } from '../../lib/localStore';
+import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, type ChatThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
+import { decideKyc, getAdminKyc } from '../../lib/api';
+import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
 import BrandMark from '../../components/BrandMark';
 
@@ -15,11 +17,15 @@ export default function AdminConsole() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [users, setUsers] = useState<StoreUser[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
+  const [kycQueue, setKycQueue] = useState<KycItem[]>([]);
+  const [verifying, setVerifying] = useState<string>('');
+  const [verifyNotice, setVerifyNotice] = useState('');
   const [copied, setCopied] = useState<string>('');
 
   function reload() {
     setUsers(getUsers());
     setActivity(getActivity());
+    setKycQueue(getKycQueue());
     setThreads(getThreads());
     if (activeThread) {
       setMessages(getThreadMessages(activeThread));
@@ -57,8 +63,21 @@ export default function AdminConsole() {
   }
 
   function approve(email: string) {
-    verifyUser(email);
-    reload();
+    setVerifying(email);
+    setVerifyNotice('');
+    const done = markLocalUserVerified(email);
+    if (!done) {
+      setVerifying('');
+      setVerifyNotice('That account is not in the local user list, so it could not be verified here.');
+      return;
+    }
+    decideKyc(`k${email.toLowerCase()}`, 'approve')
+      .catch(() => null)
+      .finally(() => {
+        reload();
+        setVerifying('');
+        setVerifyNotice(`${done.name} (${done.email}) is now verified. Their dashboard will show the Verified badge on the next refresh.`);
+      });
   }
 
   function logout() { sessionStorage.removeItem('ssb_admin'); nav('/xk9-admin-console-7f3a'); }
@@ -105,6 +124,39 @@ export default function AdminConsole() {
 
       <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
+        {verifyNotice !== '' && (
+          <div role="status" style={{ background: '#0A2044', border: '1px solid #1E7A4C', borderLeft: '4px solid #1E7A4C', padding: '12px 16px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#E5E7EB', lineHeight: 1.6 }}>
+            {verifyNotice}
+          </div>
+        )}
+
+        {kycQueue.length > 0 && (
+          <div style={{ background: '#0B2B5C', border: '1px solid #EAB308', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 700, color: '#EAB308', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                {kycQueue.length} account{kycQueue.length === 1 ? '' : 's'} awaiting verification
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {kycQueue.map(q => (
+                <div key={q.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', border: '1px solid #123C7C', padding: '10px 14px', background: '#0A2044' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#E5E7EB', fontWeight: 600, margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{q.name}</p>
+                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{q.email} · {q.type} signup · {fmtDateTime(q.submitted)}</p>
+                  </div>
+                  <button
+                    onClick={() => approve(q.email)}
+                    disabled={verifying === q.email}
+                    style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: verifying === q.email ? '#6B7280' : '#1E7A4C', border: 'none', padding: '8px 16px', cursor: verifying === q.email ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+                  >
+                    {verifying === q.email ? 'VERIFYING…' : 'VERIFY'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {pendingUsers.length > 0 && (
           <div style={{ background: '#0B2B5C', border: '1px solid #EAB308', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
@@ -118,9 +170,15 @@ export default function AdminConsole() {
                 <div key={u.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', border: '1px solid #123C7C', padding: '10px 14px', background: '#0A2044' }}>
                   <div style={{ minWidth: 0 }}>
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#E5E7EB', fontWeight: 600, margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name}</p>
-                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{u.email} · signed up {new Date(u.joined).toLocaleString()}</p>
+                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{u.email} · signed up {fmtDateTime(u.joined)}</p>
                   </div>
-                  <button onClick={() => approve(u.email)} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: '#1E7A4C', border: 'none', padding: '8px 16px', cursor: 'pointer', whiteSpace: 'nowrap' }}>VERIFY</button>
+                  <button
+                    onClick={() => approve(u.email)}
+                    disabled={verifying === u.email}
+                    style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: verifying === u.email ? '#6B7280' : '#1E7A4C', border: 'none', padding: '8px 16px', cursor: verifying === u.email ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+                  >
+                    {verifying === u.email ? 'VERIFYING…' : 'VERIFY'}
+                  </button>
                 </div>
               ))}
             </div>
@@ -198,11 +256,17 @@ export default function AdminConsole() {
                         {u.status === 'verified' ? (
                           <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#34D399', whiteSpace: 'nowrap' }}>VERIFIED</span>
                         ) : (
-                          <button onClick={() => approve(u.email)} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: '#EAB308', border: 'none', padding: '6px 14px', cursor: 'pointer', whiteSpace: 'nowrap' }}>VERIFY</button>
+                          <button
+                            onClick={() => approve(u.email)}
+                            disabled={verifying === u.email}
+                            style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: verifying === u.email ? '#6B7280' : '#EAB308', border: 'none', padding: '6px 14px', cursor: verifying === u.email ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+                          >
+                            {verifying === u.email ? 'VERIFYING…' : 'VERIFY'}
+                          </button>
                         )}
                       </td>
-                      <td style={{ padding: '11px 16px', color: '#6B7280' }}>{new Date(u.lastLogin).toLocaleString()}</td>
-                      <td style={{ padding: '11px 16px', color: '#6B7280' }}>{new Date(u.joined).toLocaleString()}</td>
+                      <td style={{ padding: '11px 16px', color: '#6B7280' }}>{fmtDateTime(u.lastLogin)}</td>
+                      <td style={{ padding: '11px 16px', color: '#6B7280' }}>{fmtDateTime(u.joined)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -230,7 +294,7 @@ export default function AdminConsole() {
                       <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{a.email}{a.via === 'admin' ? '' : ` · via ${a.via === 'google' ? 'Google' : 'email'}`}</p>
                     </div>
                   </div>
-                  <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', whiteSpace: 'nowrap' }}>{new Date(a.at).toLocaleString()}</span>
+                  <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', whiteSpace: 'nowrap' }}>{fmtDateTime(a.at)}</span>
                 </div>
               ))
             )}

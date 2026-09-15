@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { fmtUSD, fmtMoney, toAmount } from '../lib/format';
 
 const CURRENCIES = {
   GBP: { name: 'British Pound', rate: 0.7834, symbol: '£' },
@@ -9,12 +10,8 @@ const CURRENCIES = {
 
 type CurrencyCode = keyof typeof CURRENCIES;
 
-function fmtUSD(n: number) {
-  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function fmtForeign(n: number, symbol: string) {
-  return symbol + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function fmtForeign(n: unknown, symbol: string) {
+  return fmtMoney(n, symbol);
 }
 
 export default function ForeignExchange() {
@@ -157,8 +154,8 @@ export default function ForeignExchange() {
           {(Object.keys(CURRENCIES) as CurrencyCode[]).map((c, idx) => (
             <div key={c} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '12px', padding: '11px 20px', borderBottom: idx < Object.keys(CURRENCIES).length - 1 ? '1px solid #DCE3EA' : 'none', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12.5px' }}>
               <span style={{ color: '#0A2044', fontWeight: currency === c ? 600 : 400 }}>{c} ({CURRENCIES[c].name})</span>
-              <span style={{ textAlign: 'right', color: '#0A2044' }}>{rates[c].toFixed(c === 'NGN' ? 2 : 4)}</span>
-              <span style={{ textAlign: 'right', color: '#6B7280' }}>{fmtForeign(1 / rates[c], CURRENCIES[c].symbol)}</span>
+              <span style={{ textAlign: 'right', color: '#0A2044' }}>{toAmount(rates[c]).toFixed(c === 'NGN' ? 2 : 4)}</span>
+              <span style={{ textAlign: 'right', color: '#6B7280' }}>{fmtForeign(toAmount(1) / (toAmount(rates[c]) || 1), CURRENCIES[c].symbol)}</span>
             </div>
           ))}
         </div>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { fmtUSD, toAmount } from '../lib/format';
 
 const RATES = {
   BTC: 67842.50,
@@ -7,16 +8,13 @@ const RATES = {
 
 const BTC_TICK = 0.00000001;
 
-function fmtUSD(n: number) {
-  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function fmtCrypto(n: number, asset: 'BTC' | 'USDT') {
+function fmtCrypto(n: unknown, asset: 'BTC' | 'USDT') {
+  const v = toAmount(n);
   if (asset === 'BTC') {
-    const s = n.toFixed(8);
+    const s = v.toFixed(8);
     return s.replace(/\.?0+$/, '') || '0';
   }
-  return n.toFixed(2);
+  return v.toFixed(2);
 }
 
 export default function ConversionLedger() {

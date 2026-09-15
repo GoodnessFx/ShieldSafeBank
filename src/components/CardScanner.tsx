@@ -4,6 +4,7 @@ export interface CardScanResult {
   front: boolean;
   back: boolean;
   last4: string;
+  holderName: string;
   scannedAt: string;
 }
 
@@ -48,22 +49,33 @@ const STEP_COPY: Record<Exclude<Step, 'done'>, { title: string; body: string; ac
   },
 };
 
-export default function CardScanner({ onClose, onComplete }: { onClose: () => void; onComplete: (result: CardScanResult) => void }) {
+export default function CardScanner({ accountName, initialHolderName, onClose, onComplete }: { accountName: string; initialHolderName?: string; onClose: () => void; onComplete: (result: CardScanResult) => void }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const frameRef = useRef<number | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [step, setStep] = useState<Step>('intro');
   const [cameraState, setCameraState] = useState<'idle' | 'starting' | 'live' | 'denied'>('idle');
   const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState('');
+  const [scanComplete, setScanComplete] = useState(false);
   const [flash, setFlash] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [frontOk, setFrontOk] = useState(false);
   const [result, setResult] = useState<CardScanResult | null>(null);
+  const [last4, setLast4] = useState('');
+  const [last4Error, setLast4Error] = useState('');
+  const [holderName, setHolderName] = useState(
+    (initialHolderName || '').trim() || accountName.trim()
+  );
 
   const activeStep = step === 'done' ? 'back' : step;
   const copy = STEP_COPY[activeStep as Exclude<Step, 'done'>];
 
   useEffect(() => {
     return () => {
+      if (frameRef.current) cancelAnimationFrame(frameRef.current);
       if (timerRef.current) clearInterval(timerRef.current);
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
@@ -93,6 +105,10 @@ export default function CardScanner({ onClose, onComplete }: { onClose: () => vo
   }
 
   function stopCamera() {
+    if (frameRef.current) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -105,31 +121,125 @@ export default function CardScanner({ onClose, onComplete }: { onClose: () => vo
     setCameraState('idle');
   }
 
+  function captureFrameStats(): { w: number; h: number; mean: number; edge: number } | null {
+    const video = videoRef.current;
+    if (!video) return null;
+    const w = video.videoWidth || 0;
+    const h = video.videoHeight || 0;
+    if (w < 8 || h < 8) return null;
+    let canvas = canvasRef.current;
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      canvasRef.current = canvas;
+    }
+    const sw = 96;
+    const sh = Math.max(8, Math.round((h / w) * sw));
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    try {
+      ctx.drawImage(video, 0, 0, sw, sh);
+      const data = ctx.getImageData(0, 0, sw, sh).data;
+      const lum = new Array<number>(sw * sh);
+      let sum = 0;
+      for (let i = 0; i < lum.length; i += 1) {
+        const v = 0.2126 * data[i * 4] + 0.7152 * data[i * 4 + 1] + 0.0722 * data[i * 4 + 2];
+        lum[i] = v;
+        sum += v;
+      }
+      const mean = sum / lum.length;
+      let edge = 0;
+      for (let y = 1; y < sh; y += 1) {
+        for (let x = 1; x < sw; x += 1) {
+          edge += Math.abs(lum[y * sw + x] - lum[y * sw + x - 1]);
+          edge += Math.abs(lum[y * sw + x] - lum[(y - 1) * sw + x]);
+        }
+      }
+      return { w, h, mean, edge: edge / lum.length };
+    } catch {
+      return null;
+    }
+  }
+
   function runScan(nextStep: Step) {
+    setScanError('');
+    const stats = captureFrameStats();
+    if (cameraState !== 'live' || !stats) {
+      setScanError('Open your camera first so the card is visible in the frame.');
+      return;
+    }
+    if (stats.mean < 22) {
+      setScanError('The view is too dark. Move to a brighter spot and keep the card inside the frame.');
+      return;
+    }
+    if (stats.mean > 233) {
+      setScanError('There is too much glare on the card. Tilt it away from the light and try again.');
+      return;
+    }
     setScanning(true);
     setFlash(true);
     setTimeout(() => setFlash(false), 240);
     setProgress(0);
+    let samples = 0;
+    let brightSamples = 0;
+    let darkSamples = 0;
+    let edgeSum = 0;
     const startedAt = Date.now();
-    const duration = 2200;
+    const duration = 5200;
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
+      const live = captureFrameStats();
+      if (live) {
+        samples += 1;
+        edgeSum += live.edge;
+        if (live.mean > 235) brightSamples += 1;
+        if (live.mean < 20) darkSamples += 1;
+      }
       const pct = Math.min(100, ((Date.now() - startedAt) / duration) * 100);
       setProgress(pct);
       if (pct >= 100) {
         if (timerRef.current) clearInterval(timerRef.current);
         timerRef.current = null;
         setScanning(false);
-        setStep(nextStep);
-        if (nextStep === 'done') {
-          const digits = String(Math.floor(1000 + Math.random() * 9000));
-          const finished: CardScanResult = { front: true, back: true, last4: digits, scannedAt: new Date().toISOString() };
-          setResult(finished);
-          stopCamera();
-          onComplete(finished);
+        const avgEdge = samples > 0 ? edgeSum / samples : 0;
+        if (samples < 3 || avgEdge < 4.2) {
+          setScanError('This does not look like a card yet. Fill the frame with the card, hold it steady, and scan again.');
+          return;
         }
+        if (brightSamples >= Math.max(3, Math.floor(samples / 2)) || darkSamples >= Math.max(3, Math.floor(samples / 2))) {
+          setScanError('The lighting kept changing. Hold the card flat under steady light and scan again.');
+          return;
+        }
+        setScanError('');
+        if (nextStep === 'back') setFrontOk(true);
+        else setScanComplete(true);
       }
-    }, 60);
+    }, 120);
+  }
+
+  function finishScan() {
+    const trimmed = holderName.trim();
+    const digits = last4.replace(/\D/g, '').slice(-4);
+    if (digits.length !== 4) {
+      setLast4Error('Enter the last 4 digits printed on the front of the card.');
+      return;
+    }
+    if (trimmed.length < 2) {
+      setLast4Error('Enter the name printed on the card so it can be saved with these digits.');
+      return;
+    }
+    setLast4Error('');
+    const finished: CardScanResult = {
+      front: true,
+      back: true,
+      last4: digits,
+      holderName: trimmed,
+      scannedAt: new Date().toISOString(),
+    };
+    setResult(finished);
+    stopCamera();
+    onComplete(finished);
   }
 
   function handleCapture() {
@@ -166,21 +276,21 @@ export default function CardScanner({ onClose, onComplete }: { onClose: () => vo
 
         <div style={{ padding: '24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
-            <StepDot index={1} label="Front" state={step === 'front' ? 'active' : step === 'back' || step === 'done' ? 'done' : 'idle'} />
-            <div style={{ flex: 1, height: '1px', background: step === 'back' || step === 'done' ? '#1E7A4C' : '#DCE3EA' }} />
-            <StepDot index={2} label="Back" state={step === 'back' ? 'active' : step === 'done' ? 'done' : 'idle'} />
+            <StepDot index={1} label="Front" state={step === 'front' ? 'active' : frontOk || scanComplete ? 'done' : 'idle'} />
+            <div style={{ flex: 1, height: '1px', background: scanComplete ? '#1E7A4C' : '#DCE3EA' }} />
+            <StepDot index={2} label="Back" state={scanComplete ? 'done' : step === 'back' ? 'active' : 'idle'} />
           </div>
 
           <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '19px', color: '#0A2044', margin: '0 0 8px' }}>
-            {step === 'done' ? 'Card verified' : copy.title}
+            {scanComplete ? 'Confirm your card details' : copy.title}
           </h2>
           <p style={{ fontSize: '13.5px', color: '#4A5568', lineHeight: 1.6, margin: '0 0 18px' }}>
-            {step === 'done'
-              ? 'Both sides of your Shield Safe Bank card were scanned successfully and saved to your account.'
+            {scanComplete
+              ? 'Both sides were captured. Check the details below and save them to your account.'
               : copy.body}
           </p>
 
-          {step !== 'done' && (
+          {!result && (
             <>
               <div style={{ position: 'relative', background: '#0A2044', border: '1px solid #DCE3EA', aspectRatio: '16 / 10', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <video
@@ -228,13 +338,13 @@ export default function CardScanner({ onClose, onComplete }: { onClose: () => vo
 
                 {scanning && (
                   <>
-                    <div style={{ position: 'absolute', left: 0, right: 0, height: '2px', background: 'linear-gradient(90deg, rgba(71,121,196,0) 0%, #4779C4 50%, rgba(71,121,196,0) 100%)', animation: 'ssb-scan-sweep 1.6s ease-in-out infinite', pointerEvents: 'none' }} />
+                    <div style={{ position: 'absolute', left: 0, right: 0, height: '3px', background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, #ffffff 50%, rgba(255,255,255,0) 100%)', boxShadow: '0 0 14px rgba(255, 255, 255, 0.85)', animation: 'ssb-scan-sweep 3.4s ease-in-out infinite', pointerEvents: 'none' }} />
                     <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '10px 14px', background: 'rgba(10, 32, 68, 0.85)', pointerEvents: 'none' }}>
-                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11.5px', color: '#A9C6E8', margin: '0 0 6px', letterSpacing: '0.04em' }}>
+                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11.5px', color: '#fff', margin: '0 0 6px', letterSpacing: '0.04em' }}>
                         Scanning {step === 'front' ? 'front' : 'back'} of card… {Math.round(progress)}%
                       </p>
-                      <div style={{ height: '2px', background: 'rgba(71,121,196,0.3)' }}>
-                        <div style={{ height: '100%', width: `${progress}%`, background: '#4779C4', transition: 'width 0.06s linear' }} />
+                      <div style={{ height: '2px', background: 'rgba(255,255,255,0.25)' }}>
+                        <div style={{ height: '100%', width: `${progress}%`, background: '#ffffff', transition: 'width 0.12s linear' }} />
                       </div>
                     </div>
                   </>
@@ -267,7 +377,65 @@ export default function CardScanner({ onClose, onComplete }: { onClose: () => vo
                     {cameraState === 'starting' ? 'Opening camera…' : 'Open camera'}
                   </button>
                 )}
-                <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#9CA3AF', margin: 0, lineHeight: 1.6 }}>
+                {scanError !== '' && (
+                  <p role="alert" style={{ fontSize: '13px', color: '#DC2626', margin: '10px 0 0', fontWeight: 500, lineHeight: 1.6 }}>
+                    {scanError}
+                  </p>
+                )}
+
+                {frontOk && step === 'back' && !scanning && (
+                  <p role="status" style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11.5px', color: '#1E7A4C', margin: '10px 0 0', fontWeight: 600 }}>
+                    Front side accepted.
+                  </p>
+                )}
+
+                {scanComplete && (
+                  <div style={{ marginTop: '14px', border: '1px solid #DCE3EA', background: '#F4F6F8', padding: '16px' }}>
+                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4779C4', margin: '0 0 12px' }}>
+                      Confirm the details to save
+                    </p>
+                    <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#6B7280', marginBottom: '6px' }}>
+                      Last 4 digits on the card
+                    </label>
+                    <input
+                      value={last4}
+                      onChange={e => { setLast4(e.target.value.replace(/\D/g, '').slice(0, 4)); setLast4Error(''); }}
+                      inputMode="numeric"
+                      maxLength={4}
+                      placeholder="0000"
+                      aria-label="Last 4 digits on the card"
+                      style={{ width: '100%', border: '1px solid #DCE3EA', padding: '11px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '16px', fontWeight: 600, letterSpacing: '0.2em', color: '#0A2044', background: '#fff', outline: 'none' }}
+                    />
+                    <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#6B7280', margin: '12px 0 6px' }}>
+                      Name printed on the card
+                    </label>
+                    <input
+                      value={holderName}
+                      onChange={e => { setHolderName(e.target.value); setLast4Error(''); }}
+                      maxLength={60}
+                      placeholder="Cardholder name"
+                      aria-label="Name printed on the card"
+                      style={{ width: '100%', border: '1px solid #DCE3EA', padding: '11px 12px', fontSize: '15px', color: '#0A2044', background: '#fff', outline: 'none' }}
+                    />
+                    {last4Error !== '' && (
+                      <p role="alert" style={{ fontSize: '13px', color: '#DC2626', margin: '10px 0 0', fontWeight: 500, lineHeight: 1.6 }}>
+                        {last4Error}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {scanComplete && (
+                  <button
+                    onClick={() => { if (scanning) return; finishScan(); }}
+                    className="btn-primary"
+                    style={{ padding: '13px', fontSize: '14.5px', marginTop: '12px' }}
+                  >
+                    Save card details
+                  </button>
+                )}
+
+                <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#9CA3AF', margin: '10px 0 0', lineHeight: 1.6 }}>
                   Both sides are required before your card can be saved. Keep the card flat, fill the frame, and avoid shadows.
                 </p>
               </div>
@@ -284,7 +452,7 @@ export default function CardScanner({ onClose, onComplete }: { onClose: () => vo
                 <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#166534', margin: 0, lineHeight: 1.7 }}>
                   Front side captured<br />
                   Back side captured<br />
-                  Card ending •••• {result.last4}
+                  Card saved: •••• {result.last4} for {result.holderName}
                 </p>
               </div>
               <button

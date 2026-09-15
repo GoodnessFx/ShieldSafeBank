@@ -45,12 +45,23 @@ export interface ChatThread {
   unread: boolean;
 }
 
+export interface KycItem {
+  id: string;
+  name: string;
+  email: string;
+  type: string;
+  submitted: string;
+  docs: string;
+  status: string;
+}
+
 const USERS_KEY = 'ssb_live_users';
 const ACTIVITY_KEY = 'ssb_live_activity';
 const THREADS_KEY = 'ssb_live_threads';
 const MESSAGES_KEY = 'ssb_live_messages';
 const GUEST_KEY = 'ssb_live_guest';
 const TXS_KEY = 'ssb_live_txs';
+const KYC_QUEUE_KEY = 'ssb_live_kyc';
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -186,11 +197,39 @@ export function currentEmail(): string {
   return lu && lu.email ? lu.email.toLowerCase() : '';
 }
 
-export function verifyUser(email: string) {
+export function getKycQueue(): KycItem[] {
+  const queue = read<KycItem[]>(KYC_QUEUE_KEY, []);
+  if (queue.length > 0) return queue.map(q => ({ ...q }));
+  return getUsers()
+    .filter(u => u.status === 'pending')
+    .map(u => ({
+      id: `k${u.email.toLowerCase()}`,
+      name: u.name,
+      email: u.email,
+      type: u.type === 'business' ? 'Business' : 'Personal',
+      submitted: u.joined,
+      docs: 'ID and liveness check',
+      status: 'pending',
+    }));
+}
+
+export function approveKycQueueItem(id: string): KycItem | null {
+  const normalized = (id || '').toLowerCase();
+  const queue = read<KycItem[]>(KYC_QUEUE_KEY, []);
+  const entry = queue.find(q => (q.id || '').toLowerCase() === normalized)
+    || getKycQueue().find(q => (q.id || '').toLowerCase() === normalized)
+    || null;
+  if (!entry || !entry.email) return null;
+  markLocalUserVerified(entry.email);
+  write(KYC_QUEUE_KEY, queue.filter(q => (q.id || '').toLowerCase() !== normalized));
+  return { ...entry, status: 'verified' };
+}
+
+export function markLocalUserVerified(email: string): StoreUser | null {
   const users = read<Record<string, StoreUser>>(USERS_KEY, {});
   const oid = email.toLowerCase();
   const user = users[oid];
-  if (!user) return;
+  if (!user) return null;
   user.status = 'verified';
   users[oid] = user;
   write(USERS_KEY, users);
@@ -198,6 +237,22 @@ export function verifyUser(email: string) {
   const activity = read<ActivityEvent[]>(ACTIVITY_KEY, []);
   activity.unshift({ id: uid('a'), email: user.email, name: user.name, action: 'verified', via: 'admin', at: nowIso() });
   write(ACTIVITY_KEY, activity.slice(0, 300));
+
+  try {
+    const raw = localStorage.getItem('ssb_local_user');
+    if (raw) {
+      const session = JSON.parse(raw);
+      if (session && typeof session.email === 'string' && session.email.toLowerCase() === oid) {
+        session.emailVerified = true;
+        session.kycStatus = 'approved';
+        localStorage.setItem('ssb_local_user', JSON.stringify(session));
+      }
+    }
+  } catch {
+    // ignore session refresh errors
+  }
+
+  return user;
 }
 
 export function getTransactions(email: string): LocalTx[] {

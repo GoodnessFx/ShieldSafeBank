@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../lib/config';
 import { getMe, getTransactions, requestWithdrawal, submitDeposit, type MeData, type TransactionData } from '../lib/api';
+import { fmtUSD, fmtDateTimeShort, toAmount, fmtText } from '../lib/format';
 import CardScanner, { readCardScan, writeCardScan, type CardScanResult } from '../components/CardScanner';
 import Toast, { type ToastData } from '../components/Toast';
 
@@ -12,24 +13,21 @@ const TRANSACTIONS: ReturnType<typeof mapTx>[] = [];
 
 const FALLBACK_BALANCE = 0;
 
-function fmtUSD(n: number) {
-  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
 function mapTx(t: TransactionData) {
   return {
-    id: t.id,
-    date: t.date,
+    id: fmtText(t.id, ''),
+    date: fmtText(t.date),
     type: t.type === 'deposit' ? 'Deposit' : 'Withdrawal',
-    asset: t.asset,
-    amount: t.amount || '',
-    rate: t.rate ? fmtUSD(t.rate) : '',
+    asset: fmtText(t.asset),
+    amount: fmtText(t.amount, 'n/a'),
+    rate: toAmount(t.rate) > 0 ? fmtUSD(t.rate) : '',
     usd: fmtUSD(t.usd),
     status: t.status === 'completed' || t.status === 'cleared' ? 'Completed' : t.status === 'pending' ? 'Pending' : 'On Hold',
   };
 }
 
 function useCountUp(target: number, duration: number) {
+  const safeTarget = toAmount(target);
   const [value, setValue] = useState(0);
   const fromRef = useRef(0);
   useEffect(() => {
@@ -38,15 +36,15 @@ function useCountUp(target: number, duration: number) {
     const tick = (now: number) => {
       const t = Math.min(1, (now - start) / duration);
       const eased = 1 - Math.pow(1 - t, 3);
-      const v = from + (target - from) * eased;
+      const v = from + (safeTarget - from) * eased;
       setValue(v);
       fromRef.current = v;
       if (t < 1) requestAnimationFrame(tick);
-      else setValue(target);
+      else setValue(safeTarget);
     };
     const id = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(id);
-  }, [target, duration]);
+  }, [safeTarget, duration]);
   return value;
 }
 
@@ -94,9 +92,10 @@ export default function Dashboard() {
     const email = user?.email || currentEmail();
     if (email) writeCardScan(email, result);
     setCardScan(result);
+    setScanOpen(false);
     pushToast(
-      'Card scanned successfully',
-      `Front and back of your Shield Safe Bank card ending •••• ${result.last4} were captured and saved to your account.`,
+      'Card details saved',
+      `Your Shield Safe Bank card for ${result.holderName}, ending •••• ${result.last4}, was saved to your account.`,
     );
   }
 
@@ -113,7 +112,7 @@ export default function Dashboard() {
       const me = await getMe();
       if (!cancelled && me.ok && me.data) {
         setUser(me.data);
-        setBalanceTarget(me.data.balance);
+        setBalanceTarget(toAmount(me.data.balance));
         setCardScan(readCardScan(me.data.email));
       }
       const t = await getTransactions();
@@ -130,7 +129,7 @@ export default function Dashboard() {
     setDLoading(true);
     submitDeposit(activeTab === 'btc' ? 'BTC' : 'USDT', amt).then(r => {
       if (r.ok && r.data) {
-        setBalanceTarget(r.data.balance);
+        setBalanceTarget(toAmount(r.data.balance));
         setDepositAmount('');
         setDLoading(false);
         setDepositSent(true);
@@ -158,7 +157,7 @@ export default function Dashboard() {
     setWLoading(true);
     requestWithdrawal(amt).then(r => {
       if (r.ok) {
-        setBalanceTarget(r.data ? r.data.balance : balanceTarget - amt);
+        setBalanceTarget(r.data ? toAmount(r.data.balance) : toAmount(balanceTarget) - amt);
         setWithdrawAmount('');
         setWLoading(false);
         setWithdrawSent(true);
@@ -231,7 +230,7 @@ export default function Dashboard() {
             </div>
 
             <div className="card-scan-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 320px) 1fr', gap: '28px', alignItems: 'center' }}>
-              <CardVisual last4={cardScan ? cardScan.last4 : '••••'} />
+              <CardVisual last4={cardScan ? cardScan.last4 : '••••'} holderName={cardScan ? cardScan.holderName || '' : ''} />
 
               <div>
                 {cardScan ? (
@@ -239,7 +238,7 @@ export default function Dashboard() {
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#166534', margin: 0, lineHeight: 1.8 }}>
                       Front side captured<br />
                       Back side captured<br />
-                      Saved {new Date(cardScan.scannedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      Saved {fmtDateTimeShort(cardScan && cardScan.scannedAt)}{cardScan.holderName ? ` for ${cardScan.holderName}` : ''}
                     </p>
                   </div>
                 ) : (
@@ -433,6 +432,8 @@ export default function Dashboard() {
       <Toast toasts={toasts} onDismiss={dismissToast} />
       {scanOpen && (
         <CardScanner
+          accountName={user?.name || ''}
+          initialHolderName={cardScan?.holderName || ''}
           onClose={() => setScanOpen(false)}
           onComplete={handleCardComplete}
         />
@@ -441,8 +442,9 @@ export default function Dashboard() {
   );
 }
 
-function CardVisual({ last4 }: { last4: string }) {
+function CardVisual({ last4, holderName }: { last4: string; holderName: string }) {
   const masked = last4 && last4 !== '••••';
+  const holder = (holderName || '').trim();
   return (
     <figure style={{ margin: 0 }}>
       <div
@@ -489,7 +491,7 @@ function CardVisual({ last4 }: { last4: string }) {
               Cardholder
             </p>
             <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '11.5px', color: '#fff', margin: 0, letterSpacing: '0.05em', textTransform: 'uppercase', filter: 'blur(5px)', userSelect: 'none' }}>
-              Cardholder Name
+              {holder === '' ? 'Cardholder Name' : holder}
             </p>
           </div>
 

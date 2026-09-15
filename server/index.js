@@ -57,7 +57,43 @@ function loadDB() {
     writeFileSync(DATA_PATH, JSON.stringify(SEED, null, 2));
     return SEED;
   }
-  return JSON.parse(readFileSync(DATA_PATH, 'utf-8'));
+  const parsed = JSON.parse(readFileSync(DATA_PATH, 'utf-8'));
+  return normalizeDB(parsed);
+}
+
+function num(v) {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function normalizeDB(db) {
+  const store = db && typeof db === 'object' ? db : {};
+  store.users = Array.isArray(store.users) ? store.users : [];
+  store.users.forEach(u => {
+    u.balance = num(u.balance);
+    u.status = u.status || 'active';
+    u.kycStatus = u.kycStatus || 'pending';
+    u.joined = u.joined || '';
+    u.lastLogin = u.lastLogin || '';
+    u.emailVerified = !!u.emailVerified;
+    u.totpEnabled = !!u.totpEnabled;
+  });
+  store.transactions = Array.isArray(store.transactions) ? store.transactions : [];
+  store.transactions.forEach(t => {
+    t.usd = num(t.usd);
+    t.rate = num(t.rate);
+    t.amount = t.amount === undefined || t.amount === null ? '' : String(t.amount);
+    t.date = t.date || '';
+    t.type = t.type || '';
+    t.asset = t.asset || '';
+    t.status = t.status || 'pending';
+  });
+  store.kycQueue = Array.isArray(store.kycQueue) ? store.kycQueue : [];
+  store.threads = Array.isArray(store.threads) ? store.threads : [];
+  store.messages = store.messages && typeof store.messages === 'object' ? store.messages : {};
+  store.supportMessages = Array.isArray(store.supportMessages) ? store.supportMessages : [];
+  store.counters = store.counters && typeof store.counters === 'object' ? store.counters : {};
+  return store;
 }
 
 function saveDB(db) {
@@ -186,7 +222,7 @@ app.post('/api/auth/verify-email', authMiddleware, (req, res) => {
 
 app.get('/api/auth/me', authMiddleware, (req, res) => {
   const u = req.user;
-  res.json({ id:u.id, email:u.email, name:u.name, balance:u.balance, kycStatus:u.kycStatus, type:u.type, status:u.status, joined:u.joined, emailVerified:u.emailVerified });
+  res.json({ id:u.id, email:u.email, name:u.name, balance:num(u.balance), kycStatus:u.kycStatus, type:u.type, status:u.status, joined:u.joined, emailVerified:u.emailVerified });
 });
 
 app.get('/api/deposit-addresses', authMiddleware, (_, res) => {
@@ -225,7 +261,7 @@ app.get('/api/admin/users', adminMiddleware, (_, res) => {
   const users = db.users.map(u => ({
     id:u.id, name:u.name, email:u.email,
     status: u.kycStatus === 'approved' ? 'Verified' : u.status === 'suspended' ? 'Suspended' : 'Pending KYC',
-    balance: '$' + u.balance.toFixed(2), joined:u.joined, lastLogin: u.lastLogin || '',
+    balance: '$' + num(u.balance).toFixed(2), joined:u.joined, lastLogin: u.lastLogin || '',
     kyc: u.kycStatus === 'approved' ? 'Approved' : u.kycStatus === 'rejected' ? 'Rejected' : 'In Review',
   }));
   res.json(users);

@@ -1,10 +1,18 @@
 import { API_BASE } from './config';
-import { recordAuth, getUser, getTransactions as getLocalTxs, addDeposit, addWithdrawal, currentEmail } from './localStore';
+import { recordAuth, getUser, getTransactions as getLocalTxs, addDeposit, addWithdrawal, currentEmail, approveKycQueueItem } from './localStore';
+import { toAmount } from './format';
 
 interface ApiResult<T> {
   data: T | null;
   ok: boolean;
   offline: boolean;
+}
+
+type Errorable<T> = T & { error?: string; message?: string };
+
+interface AdminLoginResult {
+  token?: string;
+  error?: string;
 }
 
 let token = localStorage.getItem('ssb_token') || '';
@@ -67,7 +75,7 @@ export interface MeData {
   id: string;
   email: string;
   name: string;
-  balance: number;
+  balance: number | null;
   kycStatus: string;
   type: string;
   status: string;
@@ -81,14 +89,15 @@ export interface TransactionData {
   type: string;
   asset: string;
   amount: string;
-  rate: number;
-  usd: number;
+  rate: number | null;
+  usd: number | null;
   status: string;
 }
 
 export interface LoginResult {
   token: string;
-  user: { id: string; email: string; name: string; balance: number; kycStatus: string; type?: string };
+  error?: string;
+  user: { id: string; email: string; name: string; balance: number | null; kycStatus: string; type?: string };
 }
 
 export async function login(email: string, password: string) {
@@ -159,7 +168,7 @@ export async function getMe() {
       const u = JSON.parse(lu);
       const stored = getUser(u.email || '');
       const status = stored && stored.status === 'verified' ? 'approved' : 'pending';
-      const balance = stored ? stored.balance : 0;
+      const balance = toAmount(stored ? stored.balance : 0);
       return { data: { id: u.id || 'local', email: u.email, name: u.name, balance, kycStatus: status, type: u.type || 'personal', status, joined: stored ? stored.joined : new Date().toLocaleDateString(), emailVerified: true } as MeData, ok: true, offline: true };
     }
   }
@@ -175,25 +184,25 @@ export async function getTransactions() {
   return r;
 }
 
-export async function submitDeposit(asset: string, usd: number): Promise<ApiResult<{ ok: boolean; message: string; balance: number }>> {
-  const r = await apiFetch<{ ok: boolean; message: string; balance: number }>('/deposits', { method: 'POST', body: { asset, usd } });
+export async function submitDeposit(asset: string, usd: number): Promise<ApiResult<{ ok: boolean; message: string; balance: number | null; error?: string }>> {
+  const r = await apiFetch<{ ok: boolean; message: string; balance: number | null }>('/deposits', { method: 'POST', body: { asset, usd } });
   if (!r.ok) {
     const email = currentEmail();
     if (email) {
       const res = addDeposit(email, asset, usd);
-      if (res.ok) return { data: { ok: true, message: `Deposit of $${usd.toFixed(2)} recorded.`, balance: res.balance }, ok: true, offline: true };
+      if (res.ok) return { data: { ok: true, message: `Deposit of $${toAmount(usd).toFixed(2)} recorded.`, balance: toAmount(res.balance) }, ok: true, offline: true };
     }
   }
   return r;
 }
 
-export async function requestWithdrawal(amount: number) {
-  const r = await apiFetch<{ ok: boolean; message: string; balance: number }>('/withdrawals', { method: 'POST', body: { amount } });
+export async function requestWithdrawal(amount: number): Promise<ApiResult<{ ok: boolean; message: string; balance: number | null; error?: string }>> {
+  const r = await apiFetch<{ ok: boolean; message: string; balance: number | null }>('/withdrawals', { method: 'POST', body: { amount } });
   if (!r.ok) {
     const email = currentEmail();
     if (email) {
       const res = addWithdrawal(email, amount);
-      if (res.ok) return { data: { ok: true, message: `Withdrawal of $${amount.toFixed(2)} requested.`, balance: res.balance }, ok: true, offline: true };
+      if (res.ok) return { data: { ok: true, message: `Withdrawal of $${toAmount(amount).toFixed(2)} requested.`, balance: toAmount(res.balance) }, ok: true, offline: true };
       return { data: { ok: false, message: res.error || 'Request could not be completed.', balance: 0 }, ok: false, offline: true };
     }
   }
@@ -235,14 +244,14 @@ async function adminFetch<T>(path: string, opts?: { method?: string; body?: unkn
       return { data: null, ok: false, offline: true };
     }
     const json = await res.json();
-    if (!res.ok) return { data: json as T, ok: false, offline: false };
+    if (!res.ok) return { data: json as Errorable<T>, ok: false, offline: false };
     return { data: json as T, ok: true, offline: false };
   } catch {
     return { data: null, ok: false, offline: true };
   }
 }
 
-export async function adminLogin(email: string, password: string, totp = '') {
+export async function adminLogin(email: string, password: string, totp = ''): Promise<ApiResult<AdminLoginResult>> {
   const r = await adminFetch<{ token: string }>('/admin/login', { method: 'POST', body: { email, password, totp } });
   if (r.ok && r.data?.token) setAdminToken(r.data.token);
   if (!r.ok && r.offline) {
@@ -264,7 +273,22 @@ export async function getAdminKyc() {
 }
 
 export async function decideKyc(id: string, action: 'approve' | 'reject') {
-  return adminFetch(`/admin/kyc/${id}/${action}`, { method: 'POST' });
+  if (action === 'approve') {
+    const approved = approveKycQueueItem(id);
+    if (approved) {
+      return { data: { ok: true, status: 'approved', email: approved.email }, ok: true, offline: true };
+    }
+    const r = await adminFetch(`/admin/kyc/${id}/${action}`, { method: 'POST' });
+    if (!r.ok && r.offline) {
+      return { data: null, ok: false, offline: true };
+    }
+    return r;
+  }
+  const r = await adminFetch(`/admin/kyc/${id}/${action}`, { method: 'POST' });
+  if (!r.ok && r.offline) {
+    return { data: { ok: true, status: 'rejected', email: '' }, ok: true, offline: true };
+  }
+  return r;
 }
 
 export async function getAdminTransactions() {
