@@ -1,19 +1,16 @@
 # Deploys the shared backend (chats, users, verification, balances).
 #
-# Render free instances do not keep a persistent disk, so for production use a
-# paid instance (Starter) so `store.json` survives restarts and deploys.
+# Free tier: works immediately, but data resets on restart/redeploy (no disk).
+# For production persistence upgrade the instance to Starter and add a disk
+# mounted at /var/data with DATA_DIR=/var/data in the Render dashboard.
 services:
   - type: web
     name: shieldsafebank-api
     runtime: node
     rootDir: server
-    plan: starter
+    plan: free
     buildCommand: npm install
     startCommand: npm start
-    disk:
-      name: shieldsafebank-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: DATA_DIR
         value: /var/data
