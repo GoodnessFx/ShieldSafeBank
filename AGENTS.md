@@ -2,6 +2,27 @@
 
 React + Vite + Tailwind CSS project running inside Figma Make.
 
+## Running everything (app + shared server)
+
+```
+npm start
+```
+
+That one command starts **both** services:
+
+- **App (dev)** → http://localhost:8443 (or `$PORT`)
+- **Shared server** → http://localhost:4000 — chats, users, verification and
+  balances live here. **Keep this running**: it is what makes the admin panel
+  show everyone from every browser/device. Press `Ctrl+C` to stop both.
+
+Useful pieces:
+
+- `npm run start:app` — only the app
+- `npm run start:server` — only the shared server
+
+Admin console: `/xk9-admin-console-7f3a` (login `admin@shieldsafebank.com` /
+`admin1234`).
+
 ## Development Server
 
 A Vite development server is **already running** on `$PORT` (default 8443). You don't need to start it manually.

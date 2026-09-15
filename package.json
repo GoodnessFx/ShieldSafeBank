@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "start": "node start-all.mjs",
+    "start:app": "vite",
+    "start:server": "npm start --prefix server",
     "build": "vite build",
     "preview": "vite preview",
     "format": "oxfmt"
