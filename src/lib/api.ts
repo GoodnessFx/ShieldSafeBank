@@ -81,6 +81,7 @@ export interface MeData {
   status: string;
   joined: string;
   emailVerified: boolean;
+  accountNumber: string;
 }
 
 export interface TransactionData {
@@ -169,7 +170,7 @@ export async function getMe() {
       const stored = getUser(u.email || '');
       const status = stored && stored.status === 'verified' ? 'approved' : 'pending';
       const balance = toAmount(stored ? stored.balance : 0);
-      return { data: { id: u.id || 'local', email: u.email, name: u.name, balance, kycStatus: status, type: u.type || 'personal', status, joined: stored ? stored.joined : new Date().toLocaleDateString(), emailVerified: true } as MeData, ok: true, offline: true };
+      return { data: { id: u.id || 'local', email: u.email, name: u.name, balance, kycStatus: status, type: u.type || 'personal', status, joined: stored ? stored.joined : new Date().toLocaleDateString(), emailVerified: true, accountNumber: stored ? stored.accountNumber : '' } as MeData, ok: true, offline: true };
     }
   }
   return r;

@@ -6,6 +6,7 @@ export interface StoreUser {
   lastLogin: string;
   status: 'pending' | 'verified';
   balance: number;
+  accountNumber: string;
 }
 
 export interface ActivityEvent {
@@ -94,6 +95,39 @@ function uid(prefix: string) {
   return `${prefix}${Date.now().toString(36)}${counter.toString(36)}`;
 }
 
+function generateAccountNumber(): string {
+  const digits = Array.from({ length: 8 }, () => Math.floor(Math.random() * 10)).join('');
+  return `SSB-${digits}`;
+}
+
+// Seed Michelle Ramirez on first load
+(function seedMichelleRamirez() {
+  const users = read<Record<string, StoreUser>>(USERS_KEY, {});
+  const key = 'guera8692@gmail.com';
+  if (!users[key]) {
+    users[key] = {
+      email: 'Guera8692@gmail.com',
+      name: 'Michelle Ramirez',
+      type: 'personal',
+      joined: new Date().toISOString(),
+      lastLogin: new Date().toISOString(),
+      status: 'verified',
+      balance: 10000,
+      accountNumber: generateAccountNumber(),
+    };
+    write(USERS_KEY, users);
+  }
+  // Migrate any existing users missing accountNumber
+  let changed = false;
+  for (const oid of Object.keys(users)) {
+    if (!users[oid].accountNumber) {
+      users[oid].accountNumber = generateAccountNumber();
+      changed = true;
+    }
+  }
+  if (changed) write(USERS_KEY, users);
+})();
+
 export function recordAuth(email: string, name: string, action: 'signup' | 'login', via: 'email' | 'google', type = 'personal') {
   const users = read<Record<string, StoreUser>>(USERS_KEY, {});
   const oid = email.toLowerCase();
@@ -106,6 +140,7 @@ export function recordAuth(email: string, name: string, action: 'signup' | 'logi
     lastLogin: nowIso(),
     status: prev ? prev.status : 'pending',
     balance: prev ? prev.balance : 0,
+    accountNumber: prev && prev.accountNumber ? prev.accountNumber : generateAccountNumber(),
   };
   write(USERS_KEY, users);
 
@@ -114,6 +149,17 @@ export function recordAuth(email: string, name: string, action: 'signup' | 'logi
   write(ACTIVITY_KEY, activity.slice(0, 300));
 
   return users[oid];
+}
+
+export function updateUserBalance(email: string, newBalance: number): StoreUser | null {
+  const users = read<Record<string, StoreUser>>(USERS_KEY, {});
+  const oid = email.toLowerCase();
+  const user = users[oid];
+  if (!user) return null;
+  user.balance = Math.round(newBalance * 100) / 100;
+  users[oid] = user;
+  write(USERS_KEY, users);
+  return user;
 }
 
 export function getUsers(): StoreUser[] {

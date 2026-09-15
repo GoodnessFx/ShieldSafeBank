@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, type ChatThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
+import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, type ChatThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
 import { decideKyc, getAdminKyc } from '../../lib/api';
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
@@ -21,6 +21,8 @@ export default function AdminConsole() {
   const [verifying, setVerifying] = useState<string>('');
   const [verifyNotice, setVerifyNotice] = useState('');
   const [copied, setCopied] = useState<string>('');
+  const [editingBalance, setEditingBalance] = useState<string | null>(null);
+  const [balanceInput, setBalanceInput] = useState('');
 
   function reload() {
     setUsers(getUsers());
@@ -241,8 +243,8 @@ export default function AdminConsole() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px' }}>
                 <thead>
                   <tr style={{ background: '#0B2B5C' }}>
-                    {['Name', 'Email', 'Type', 'Status', 'Last Login', 'Joined'].map(h => (
-                      <th key={h} style={{ padding: '10px 16px', textAlign: 'left', color: '#4779C4', fontWeight: 600, fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid #123C7C', whiteSpace: 'nowrap' }}>{h}</th>
+                    {['Name', 'Email', 'Account Number', 'Type', 'Balance', 'Status', 'Last Login', 'Joined'].map(h => (
+                      <th key={h} style={{ padding: '10px 16px', textAlign: h === 'Balance' ? 'right' : 'left', color: '#4779C4', fontWeight: 600, fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid #123C7C', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -251,7 +253,62 @@ export default function AdminConsole() {
                     <tr key={u.email} style={{ borderBottom: i < users.length - 1 ? '1px solid #123C7C' : 'none' }}>
                       <td style={{ padding: '11px 16px', color: '#E5E7EB', fontWeight: 600 }}>{u.name}</td>
                       <td style={{ padding: '11px 16px', color: '#A9C6E8' }}>{u.email}</td>
+                      <td style={{ padding: '11px 16px', color: '#E5E7EB', fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.04em' }}>{u.accountNumber || '—'}</td>
                       <td style={{ padding: '11px 16px', color: '#E5E7EB', textTransform: 'capitalize' }}>{u.type}</td>
+                      <td style={{ padding: '11px 16px', textAlign: 'right' }}>
+                        {editingBalance === u.email ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end' }}>
+                            <span style={{ color: '#6B7280' }}>$</span>
+                            <input
+                              type="number"
+                              value={balanceInput}
+                              onChange={e => setBalanceInput(e.target.value)}
+                              step="0.01"
+                              min="0"
+                              style={{ width: '100px', background: '#0B2B5C', border: '1px solid #4779C4', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#E5E7EB', outline: 'none', textAlign: 'right' }}
+                              autoFocus
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  const val = parseFloat(balanceInput);
+                                  if (!isNaN(val) && val >= 0) {
+                                    updateUserBalance(u.email, val);
+                                    reload();
+                                  }
+                                  setEditingBalance(null);
+                                  setBalanceInput('');
+                                } else if (e.key === 'Escape') {
+                                  setEditingBalance(null);
+                                  setBalanceInput('');
+                                }
+                              }}
+                            />
+                            <button
+                              onClick={() => {
+                                const val = parseFloat(balanceInput);
+                                if (!isNaN(val) && val >= 0) {
+                                  updateUserBalance(u.email, val);
+                                  reload();
+                                }
+                                setEditingBalance(null);
+                                setBalanceInput('');
+                              }}
+                              style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#fff', background: '#1E7A4C', border: 'none', padding: '5px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                            >SAVE</button>
+                            <button
+                              onClick={() => { setEditingBalance(null); setBalanceInput(''); }}
+                              style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#E5E7EB', background: '#374151', border: 'none', padding: '5px 8px', cursor: 'pointer' }}
+                            >✕</button>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end' }}>
+                            <span style={{ color: '#E5E7EB', fontWeight: 600 }}>${u.balance.toFixed(2)}</span>
+                            <button
+                              onClick={() => { setEditingBalance(u.email); setBalanceInput(u.balance.toFixed(2)); }}
+                              style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#fff', background: '#4779C4', border: 'none', padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                            >EDIT</button>
+                          </div>
+                        )}
+                      </td>
                       <td style={{ padding: '11px 16px' }}>
                         {u.status === 'verified' ? (
                           <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#34D399', whiteSpace: 'nowrap' }}>VERIFIED</span>

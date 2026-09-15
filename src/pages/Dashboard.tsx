@@ -196,6 +196,16 @@ export default function Dashboard() {
           {/* Balance card */}
           <div id="overview" className="dash-balance-card" style={{ background: '#123C7C', padding: '36px', display: 'grid', gridTemplateColumns: '1fr auto', gap: '20px', alignItems: 'center' }}>
             <div>
+              {user && (
+                <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#fff', margin: '0 0 4px' }}>
+                  Welcome, {user.name}
+                </p>
+              )}
+              {user && user.accountNumber && (
+                <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#A9C6E8', margin: '0 0 12px', letterSpacing: '0.04em' }}>
+                  Account: {user.accountNumber}
+                </p>
+              )}
               <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', margin: '0 0 8px' }}>USD Balance</p>
               <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: 'clamp(36px, 5vw, 56px)', fontWeight: 600, color: '#fff', margin: '0 0 4px', letterSpacing: '-0.02em' }}>
                 {fmtUSD(balance)}
