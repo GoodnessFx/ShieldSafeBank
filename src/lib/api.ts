@@ -1,5 +1,5 @@
 import { API_BASE } from './config';
-import { recordAuth, getUser, getTransactions as getLocalTxs, addDeposit, addWithdrawal, currentEmail, approveKycQueueItem } from './localStore';
+import { recordAuth, ensureAccount, getUsers, getTransactions as getLocalTxs, addDeposit, addWithdrawal, currentEmail, approveKycQueueItem } from './localStore';
 import { toAmount } from './format';
 
 interface ApiResult<T> {
@@ -42,8 +42,14 @@ function writeLocalUsers(users: Record<string, LocalUser>) {
   localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
 }
 
-function saveLocalSession(email: string, name: string, type: string) {
+/** Records who is signed in without touching the API token. */
+function saveSession(email: string, name: string, type: string) {
   localStorage.setItem(LOCAL_USER_KEY, JSON.stringify({ id: 'local', email, name, type }));
+  localStorage.setItem('ssb_auth', '1');
+}
+
+function saveLocalSession(email: string, name: string, type: string) {
+  saveSession(email, name, type);
   setToken('local');
 }
 
@@ -105,6 +111,9 @@ export async function login(email: string, password: string) {
   const r = await apiFetch<LoginResult>('/auth/login', { method: 'POST', body: { email, password } });
   if (r.ok && r.data?.token) {
     setToken(r.data.token);
+    // Keep the session locally too, so the dashboard always knows who signed in
+    // and can show their balance and account number.
+    saveSession(email, r.data.user.name || '', r.data.user.type || 'personal');
     recordAuth(email, r.data.user.name, 'login', 'email', r.data.user.type || 'personal');
   }
   if (!r.ok && r.offline) {
@@ -122,6 +131,7 @@ export async function register(payload: { email: string; password: string; name:
   const r = await apiFetch<LoginResult>('/auth/register', { method: 'POST', body: payload });
   if (r.ok && r.data?.token) {
     setToken(r.data.token);
+    saveSession(payload.email, r.data.user.name || payload.name, payload.type || 'personal');
     recordAuth(payload.email, r.data.user.name || payload.name, 'signup', 'email', payload.type);
   }
   if (!r.ok && r.offline) {
@@ -142,7 +152,8 @@ export async function googleAuth(email: string, name: string, idToken = '') {
   const r = await apiFetch<LoginResult>('/auth/google', { method: 'POST', body: { email, name, idToken } });
   if (r.ok && r.data?.token) {
     setToken(r.data.token);
-    recordAuth(email, r.data.user.name || name, existed ? 'login' : 'signup', 'google');
+    saveSession(email, r.data.user.name || name, r.data.user.type || 'personal');
+    recordAuth(email, r.data.user.name || name, existed ? 'login' : 'signup', 'google', r.data.user.type || 'personal');
   }
   if (!r.ok && r.offline) {
     const users = readLocalUsers();
@@ -161,19 +172,66 @@ export async function forgotPassword(email: string) {
   return apiFetch('/auth/forgot-password', { method: 'POST', body: { email } });
 }
 
+/**
+ * The browser can be marked as signed in (`ssb_auth`) with no session record —
+ * for example after signing in on a page that did not store one. Falling back to
+ * the most recently active account means a signed-in customer still sees their
+ * balance and account number instead of an empty dashboard.
+ */
+function fallbackSignedInEmail(): string {
+  if (localStorage.getItem('ssb_auth') !== '1') return '';
+  const recent = getUsers().sort((a, b) => (a.lastLogin < b.lastLogin ? 1 : -1));
+  return recent.length > 0 ? recent[0].email : '';
+}
+
 export async function getMe() {
   const r = await apiFetch<MeData>('/auth/me');
-  if (!r.ok) {
-    const lu = localStorage.getItem('ssb_local_user');
-    if (lu) {
-      const u = JSON.parse(lu);
-      const stored = getUser(u.email || '');
-      const status = stored && stored.status === 'verified' ? 'approved' : 'pending';
-      const balance = toAmount(stored ? stored.balance : 0);
-      return { data: { id: u.id || 'local', email: u.email, name: u.name, balance, kycStatus: status, type: u.type || 'personal', status, joined: stored ? stored.joined : new Date().toLocaleDateString(), emailVerified: true, accountNumber: stored ? stored.accountNumber : '' } as MeData, ok: true, offline: true };
-    }
+  const server = r.ok && r.data ? r.data : null;
+
+  let session: { id?: string; email?: string; name?: string; type?: string } | null = null;
+  const raw = localStorage.getItem('ssb_local_user');
+  if (raw) {
+    try { session = JSON.parse(raw); } catch { session = null; }
   }
-  return r;
+
+  const email = (session && session.email) || (server ? server.email : '') || fallbackSignedInEmail();
+  if (!email) return r;
+
+  // Guarantees an account record with a full-name account number and the
+  // opening credit, so a signed-in user always sees both on the dashboard.
+  const stored = ensureAccount(
+    email,
+    (session && session.name) || (server && server.name) || '',
+    (session && session.type) || (server && server.type) || 'personal',
+  );
+  if (!stored) return r;
+
+  const localBalance = toAmount(stored.balance);
+  const serverBalance = server ? toAmount(server.balance) : null;
+  // A balance an admin set by hand is authoritative. Otherwise show the higher
+  // of the two sources, so a credit is never hidden by a stale server copy.
+  const balance = serverBalance === null || stored.adminAdjusted ? localBalance : Math.max(localBalance, serverBalance);
+
+  const serverKyc = server && server.kycStatus ? String(server.kycStatus) : '';
+  const kycStatus = stored.status === 'verified' ? 'approved' : (serverKyc || 'pending');
+  const status = stored.status === 'verified' ? 'approved' : (server && server.status ? String(server.status) : 'pending');
+
+  return {
+    data: {
+      id: (server && server.id) || (session && session.id) || 'local',
+      email: stored.email || email,
+      name: stored.name || (session && session.name) || (server && server.name) || email,
+      balance,
+      kycStatus,
+      type: stored.type || 'personal',
+      status,
+      joined: stored.joined || (server ? server.joined : new Date().toLocaleDateString()),
+      emailVerified: server ? !!server.emailVerified : true,
+      accountNumber: stored.accountNumber,
+    } as MeData,
+    ok: true,
+    offline: !r.ok,
+  };
 }
 
 export async function getTransactions() {

@@ -203,7 +203,7 @@ export default function Dashboard() {
               )}
               {user && user.accountNumber && (
                 <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#A9C6E8', margin: '0 0 12px', letterSpacing: '0.04em' }}>
-                  Account: {user.accountNumber}
+                  Account number: {user.accountNumber}
                 </p>
               )}
               <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', margin: '0 0 8px' }}>USD Balance</p>
@@ -375,7 +375,10 @@ export default function Dashboard() {
                     </p>
                   </div>
                   {withdrawError && <p style={{ fontSize: '13px', color: '#DC2626', margin: 0, fontWeight: 500 }}>{withdrawError}</p>}
-                  <div style={{ background: '#F4F6F8', border: '1px solid #DCE3EA', padding: '12px 14px' }}>
+                  <div style={{ background: '#F4F6F8', border: '1px solid #DCE3EA', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#374151', margin: 0 }}>
+                      From: {user && user.accountNumber ? user.accountNumber : 'Shield Safe Bank account'}
+                    </p>
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#374151', margin: 0 }}>
                       To: ••••• Bank ending 4821 (ACH)
                     </p>

@@ -13,6 +13,9 @@ const PORT = process.env.PORT || 4000;
 const BTC_ADDR = 'bc1q4ulqydnrstew9hr2dkjaey5he2j2zyj83475mc';
 const USDT_ADDR = '0x18595c69b0e49dA32037E19246Fe88FA321De1C6';
 
+/** The bank's full name — account numbers never use an abbreviation such as "SSB". */
+const BANK_NAME = 'Shield Safe Bank';
+
 const SEED = {
   users: [
     { id:'U001', email:'demo@shieldsafebank.com', password:'demo1234', name:'Demo User', type:'personal', status:'active', balance:17760.94, kycStatus:'approved', joined:'2025-08-10', emailVerified:true, totpEnabled:true },
@@ -54,16 +57,29 @@ const SEED = {
 
 function loadDB() {
   if (!existsSync(DATA_PATH)) {
-    writeFileSync(DATA_PATH, JSON.stringify(SEED, null, 2));
-    return SEED;
+    const seed = normalizeDB(SEED);
+    writeFileSync(DATA_PATH, JSON.stringify(seed, null, 2));
+    return seed;
   }
-  const parsed = JSON.parse(readFileSync(DATA_PATH, 'utf-8'));
-  return normalizeDB(parsed);
+  const store = normalizeDB(JSON.parse(readFileSync(DATA_PATH, 'utf-8')));
+  // Persist the normalised store so generated account numbers stay stable.
+  writeFileSync(DATA_PATH, JSON.stringify(store, null, 2));
+  return store;
 }
 
 function num(v) {
   const n = typeof v === 'number' ? v : Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Issues an account number using the bank's full name, keeping the digits of an
+ * existing number (including any legacy "SSB-…" value) so it stays recognisable.
+ */
+function makeAccountNumber(existing) {
+  const digits = String(existing || '').replace(/\D/g, '')
+    || Array.from({ length: 8 }, () => Math.floor(Math.random() * 10)).join('');
+  return `${BANK_NAME}-${digits}`;
 }
 
 function normalizeDB(db) {
@@ -77,6 +93,7 @@ function normalizeDB(db) {
     u.lastLogin = u.lastLogin || '';
     u.emailVerified = !!u.emailVerified;
     u.totpEnabled = !!u.totpEnabled;
+    u.accountNumber = makeAccountNumber(u.accountNumber);
   });
   store.transactions = Array.isArray(store.transactions) ? store.transactions : [];
   store.transactions.forEach(t => {
@@ -146,13 +163,14 @@ app.post('/api/auth/register', (req, res) => {
     id: nextId(db,'user'), email, password, name, type: type || 'personal',
     status:'active', balance:0, kycStatus:'pending', joined: new Date().toISOString().slice(0,10),
     emailVerified:false, totpEnabled:false, businessName: businessName || '',
+    accountNumber: makeAccountNumber(),
     lastLogin: new Date().toISOString(),
   };
   db.users.push(user);
   saveDB(db);
   const token = newToken();
   tokens.set(token, user.id);
-  res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus } });
+  res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
 });
 
 app.post('/api/auth/login', (req, res) => {
@@ -166,7 +184,7 @@ app.post('/api/auth/login', (req, res) => {
   tokens.set(token, user.id);
   user.lastLogin = new Date().toISOString();
   saveDB(db);
-  res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type } });
+  res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
 });
 
 async function verifyGoogleIdToken(idToken) {
@@ -197,6 +215,7 @@ app.post('/api/auth/google', async (req, res) => {
       id: nextId(db,'user'), email: emailToUse, password:'', name: nameToUse,
       type:'personal', status:'active', balance:0, kycStatus:'approved',
       joined: new Date().toISOString().slice(0,10), emailVerified:true, totpEnabled:false,
+      accountNumber: makeAccountNumber(),
       lastLogin: new Date().toISOString(),
     };
     db.users.push(user);
@@ -207,7 +226,7 @@ app.post('/api/auth/google', async (req, res) => {
   }
   const token = newToken();
   tokens.set(token, user.id);
-  res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus } });
+  res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
 });
 
 app.post('/api/auth/forgot-password', (_, res) => {
@@ -222,7 +241,7 @@ app.post('/api/auth/verify-email', authMiddleware, (req, res) => {
 
 app.get('/api/auth/me', authMiddleware, (req, res) => {
   const u = req.user;
-  res.json({ id:u.id, email:u.email, name:u.name, balance:num(u.balance), kycStatus:u.kycStatus, type:u.type, status:u.status, joined:u.joined, emailVerified:u.emailVerified });
+  res.json({ id:u.id, email:u.email, name:u.name, balance:num(u.balance), kycStatus:u.kycStatus, type:u.type, status:u.status, joined:u.joined, emailVerified:u.emailVerified, accountNumber:u.accountNumber });
 });
 
 app.get('/api/deposit-addresses', authMiddleware, (_, res) => {
@@ -259,7 +278,7 @@ app.post('/api/support/message', (req, res) => {
 
 app.get('/api/admin/users', adminMiddleware, (_, res) => {
   const users = db.users.map(u => ({
-    id:u.id, name:u.name, email:u.email,
+    id:u.id, name:u.name, email:u.email, accountNumber:u.accountNumber,
     status: u.kycStatus === 'approved' ? 'Verified' : u.status === 'suspended' ? 'Suspended' : 'Pending KYC',
     balance: '$' + num(u.balance).toFixed(2), joined:u.joined, lastLogin: u.lastLogin || '',
     kyc: u.kycStatus === 'approved' ? 'Approved' : u.kycStatus === 'rejected' ? 'Rejected' : 'In Review',

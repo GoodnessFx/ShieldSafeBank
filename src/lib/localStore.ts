@@ -1,3 +1,5 @@
+import { ACCOUNT_NUMBER_PREFIX, WELCOME_CREDIT_USD } from './config';
+
 export interface StoreUser {
   email: string;
   name: string;
@@ -7,6 +9,12 @@ export interface StoreUser {
   status: 'pending' | 'verified';
   balance: number;
   accountNumber: string;
+  /** Set when an admin edits the balance by hand. Admin figures are never overwritten automatically. */
+  adminAdjusted?: boolean;
+  /** Set once the opening credit has been applied, so it is applied exactly once. */
+  welcomeCreditApplied?: boolean;
+  /** Set once the seeded opening balance has been applied. */
+  seedBalanceApplied?: boolean;
 }
 
 export interface ActivityEvent {
@@ -96,52 +104,201 @@ function uid(prefix: string) {
 }
 
 function generateAccountNumber(): string {
-  const digits = Array.from({ length: 8 }, () => Math.floor(Math.random() * 10)).join('');
-  return `SSB-${digits}`;
+  return `${ACCOUNT_NUMBER_PREFIX}-${accountDigits()}`;
 }
 
-// Seed Michelle Ramirez on first load
+function accountDigits(): string {
+  return Array.from({ length: 8 }, () => Math.floor(Math.random() * 10)).join('');
+}
+
+function toNumber(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function roundMoney(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * Account numbers are issued with the bank's full name. Anything issued under
+ * an abbreviation ("SSB-…") or as bare digits is upgraded in place, keeping the
+ * original account digits so an existing account number stays recognisable.
+ */
+export function normalizeAccountNumber(value: string): string {
+  const digits = String(value || '').replace(/\D/g, '');
+  return `${ACCOUNT_NUMBER_PREFIX}-${digits || accountDigits()}`;
+}
+
+function txDate(): string {
+  return new Date(nowIso()).toLocaleString([], { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function openingCreditTx(): LocalTx {
+  return {
+    id: uid('t'),
+    date: txDate(),
+    type: 'deposit',
+    asset: 'USD',
+    amount: WELCOME_CREDIT_USD.toFixed(2),
+    rate: 1,
+    usd: WELCOME_CREDIT_USD,
+    status: 'Cleared',
+  };
+}
+
+/**
+ * Every account gets one opening credit so a freshly opened account is never
+ * empty. It is a floor, not a top-up: an existing or admin-set balance is never
+ * reduced. Returns true when the balance actually changed.
+ */
+function applyOpeningCredit(user: StoreUser): boolean {
+  if (user.welcomeCreditApplied) return false;
+  const before = toNumber(user.balance);
+  user.balance = roundMoney(Math.max(before, WELCOME_CREDIT_USD));
+  user.welcomeCreditApplied = true;
+  return user.balance > before;
+}
+
+const SEEDED_ACCOUNT = { email: 'Guera8692@gmail.com', name: 'Michelle Ramirez', type: 'personal' };
+const SEEDED_OPENING_BALANCE = 10000;
+
+/**
+ * Seeds the launch account on first load and keeps every stored account valid:
+ * a full-name account number, and the opening credit applied once. Balances an
+ * admin has edited are left exactly as the admin left them.
+ */
 (function seedMichelleRamirez() {
   const users = read<Record<string, StoreUser>>(USERS_KEY, {});
-  const key = 'guera8692@gmail.com';
+  let changed = false;
+
+  const key = SEEDED_ACCOUNT.email.toLowerCase();
   if (!users[key]) {
     users[key] = {
-      email: 'Guera8692@gmail.com',
-      name: 'Michelle Ramirez',
-      type: 'personal',
-      joined: new Date().toISOString(),
-      lastLogin: new Date().toISOString(),
+      email: SEEDED_ACCOUNT.email,
+      name: SEEDED_ACCOUNT.name,
+      type: SEEDED_ACCOUNT.type,
+      joined: nowIso(),
+      lastLogin: nowIso(),
       status: 'verified',
-      balance: 10000,
+      balance: SEEDED_OPENING_BALANCE,
       accountNumber: generateAccountNumber(),
+      welcomeCreditApplied: true,
+      seedBalanceApplied: true,
     };
-    write(USERS_KEY, users);
+    changed = true;
   }
-  // Migrate any existing users missing accountNumber
-  let changed = false;
+
   for (const oid of Object.keys(users)) {
-    if (!users[oid].accountNumber) {
-      users[oid].accountNumber = generateAccountNumber();
+    const user = users[oid];
+    if (!user) continue;
+
+    const accountNumber = normalizeAccountNumber(user.accountNumber);
+    if (accountNumber !== user.accountNumber) {
+      user.accountNumber = accountNumber;
+      changed = true;
+    }
+
+    // The launch account opens funded unless an admin has set that balance by hand.
+    if (
+      oid === key &&
+      !user.adminAdjusted &&
+      !user.seedBalanceApplied &&
+      toNumber(user.balance) < SEEDED_OPENING_BALANCE
+    ) {
+      user.balance = SEEDED_OPENING_BALANCE;
+      user.seedBalanceApplied = true;
+      changed = true;
+    }
+
+    if (applyOpeningCredit(user)) {
+      pushTx(oid, openingCreditTx());
       changed = true;
     }
   }
+
   if (changed) write(USERS_KEY, users);
 })();
+
+/**
+ * Guarantees a local account record for the signed-in email: the account exists,
+ * it has an account number written with the bank's full name, and the opening
+ * credit has been applied. Used on every dashboard load, so a signed-in user
+ * always sees a balance and an account number.
+ */
+export function ensureAccount(email: string, name = '', type = 'personal'): StoreUser | null {
+  if (!email) return null;
+  const users = read<Record<string, StoreUser>>(USERS_KEY, {});
+  const oid = email.toLowerCase();
+  let changed = false;
+  let user = users[oid];
+
+  if (!user) {
+    user = {
+      email,
+      name: name || email,
+      type: type || 'personal',
+      joined: nowIso(),
+      lastLogin: nowIso(),
+      status: 'pending',
+      balance: 0,
+      accountNumber: generateAccountNumber(),
+    };
+    changed = true;
+  } else if (!user.name && name) {
+    user.name = name;
+    changed = true;
+  }
+
+  const accountNumber = normalizeAccountNumber(user.accountNumber);
+  if (accountNumber !== user.accountNumber) {
+    user.accountNumber = accountNumber;
+    changed = true;
+  }
+
+  if (applyOpeningCredit(user)) {
+    pushTx(oid, openingCreditTx());
+    changed = true;
+  }
+
+  users[oid] = user;
+  if (changed) write(USERS_KEY, users);
+  return user;
+}
 
 export function recordAuth(email: string, name: string, action: 'signup' | 'login', via: 'email' | 'google', type = 'personal') {
   const users = read<Record<string, StoreUser>>(USERS_KEY, {});
   const oid = email.toLowerCase();
   const prev = users[oid];
-  users[oid] = {
-    email,
-    name: prev ? prev.name : name,
-    type: prev ? prev.type : type,
-    joined: prev ? prev.joined : nowIso(),
-    lastLogin: nowIso(),
-    status: prev ? prev.status : 'pending',
-    balance: prev ? prev.balance : 0,
-    accountNumber: prev && prev.accountNumber ? prev.accountNumber : generateAccountNumber(),
-  };
+
+  if (prev) {
+    users[oid] = {
+      ...prev,
+      email: prev.email || email,
+      name: prev.name || name,
+      type: prev.type || type,
+      joined: prev.joined || nowIso(),
+      lastLogin: nowIso(),
+      balance: toNumber(prev.balance),
+      accountNumber: normalizeAccountNumber(prev.accountNumber),
+    };
+    // An account that never received its opening credit gets it on sign-in.
+    if (applyOpeningCredit(users[oid])) pushTx(oid, openingCreditTx());
+  } else {
+    users[oid] = {
+      email,
+      name,
+      type,
+      joined: nowIso(),
+      lastLogin: nowIso(),
+      status: 'pending',
+      balance: WELCOME_CREDIT_USD,
+      accountNumber: generateAccountNumber(),
+      welcomeCreditApplied: true,
+    };
+    pushTx(oid, openingCreditTx());
+  }
+
   write(USERS_KEY, users);
 
   const activity = read<ActivityEvent[]>(ACTIVITY_KEY, []);
@@ -157,6 +314,10 @@ export function updateUserBalance(email: string, newBalance: number): StoreUser 
   const user = users[oid];
   if (!user) return null;
   user.balance = Math.round(newBalance * 100) / 100;
+  // Flag admin edits so the stored figure is authoritative and is never
+  // overwritten by the seed or by an opening credit.
+  user.adminAdjusted = true;
+  user.welcomeCreditApplied = true;
   users[oid] = user;
   write(USERS_KEY, users);
   return user;
@@ -323,10 +484,8 @@ export function addDeposit(email: string, asset: string, usd: number) {
   user.balance = Math.round((user.balance + usd) * 100) / 100;
   users[oid] = user;
   write(USERS_KEY, users);
-  const iso = nowIso();
-  const date = new Date(iso).toLocaleString([], { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   const tx: LocalTx = {
-    id: uid('t'), date, type: 'deposit', asset,
+    id: uid('t'), date: txDate(), type: 'deposit', asset,
     amount: usd.toFixed(2), rate: 1, usd,
     status: 'Cleared',
   };
@@ -345,10 +504,8 @@ export function addWithdrawal(email: string, usd: number) {
   user.balance = Math.round((user.balance - usd) * 100) / 100;
   users[oid] = user;
   write(USERS_KEY, users);
-  const iso = nowIso();
-  const date = new Date(iso).toLocaleString([], { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   const tx: LocalTx = {
-    id: uid('t'), date, type: 'withdrawal', asset: 'USD',
+    id: uid('t'), date: txDate(), type: 'withdrawal', asset: 'USD',
     amount: '', rate: 0, usd,
     status: 'Pending',
   };
