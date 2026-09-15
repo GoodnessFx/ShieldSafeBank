@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
-import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, getAdminThreads, getAdminMessages, replyThread, markAdminThreadRead } from '../../lib/api';
+import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, getAdminThreads, getAdminMessages, replyThread, markAdminThreadRead, verifyAdminUser } from '../../lib/api';
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
 import BrandMark from '../../components/BrandMark';
@@ -57,6 +57,7 @@ export default function AdminConsole() {
   const [editingBalance, setEditingBalance] = useState<string | null>(null);
   const [balanceInput, setBalanceInput] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
+  const [serverOnline, setServerOnline] = useState(true);
 
   async function reload() {
     // Everyone who has signed up locally, combined with anyone stored on the
@@ -64,8 +65,10 @@ export default function AdminConsole() {
     // only ones with a serverId so an admin edit can also apply server-side.
     const local = getUsers();
     let remote: AdminUserRow[] = [];
+    let online = false;
     try {
       const sr = await getAdminUsers();
+      online = sr.ok;
       if (sr.ok && sr.data) {
         remote = sr.data.map(m => ({
           email: m.email,
@@ -82,6 +85,7 @@ export default function AdminConsole() {
     } catch {
       remote = [];
     }
+    setServerOnline(online);
     const byEmail = new Map<string, AdminUserRow>();
     for (const r of remote) byEmail.set(r.email.toLowerCase(), r);
     for (const l of local) {
@@ -173,26 +177,36 @@ export default function AdminConsole() {
 
   function saveBalance(u: AdminUserRow, val: number) {
     if (isNaN(val) || val < 0) return;
-    updateUserBalance(u.email, val);
+    // Persist to the shared server first (visible to every admin browser), then
+    // keep a local copy too so offline/browser-only accounts still work.
     if (u.serverId) setAdminUserBalance(u.serverId, val).catch(() => null);
+    updateUserBalance(u.email, val);
     reload();
   }
 
-  function approve(email: string) {
-    setVerifying(email);
+  // Verifies a user wherever the account actually lives. Accounts created on the
+  // shared server (any browser) are verified server-side; browser-only accounts
+  // fall back to the local store. Either way the admin can verify everyone.
+  async function approve(row: { email: string; name?: string; serverId?: string }) {
+    setVerifying(row.email);
     setVerifyNotice('');
-    const done = markLocalUserVerified(email);
-    if (!done) {
-      setVerifying('');
-      setVerifyNotice('That account is not in the local user list, so it could not be verified here.');
-      return;
+    let verifiedName = '';
+    if (row.serverId) {
+      try {
+        const r = await verifyAdminUser(row.serverId);
+        if (r.ok && r.data) verifiedName = r.data.name || row.name || '';
+      } catch { /* offline — fall through to local below */ }
     }
-    decideKyc(`k${email.toLowerCase()}`, 'approve')
+    if (!verifiedName) {
+      const local = markLocalUserVerified(row.email);
+      verifiedName = local ? local.name : row.name || '';
+    }
+    decideKyc(`k${row.email.toLowerCase()}`, 'approve')
       .catch(() => null)
       .finally(() => {
         reload();
         setVerifying('');
-        setVerifyNotice(`${done.name} (${done.email}) is now verified. Their dashboard will show the Verified badge on the next refresh.`);
+        setVerifyNotice(`${verifiedName || row.name || 'Account'} (${row.email}) is now verified. Their dashboard will show the Verified badge on the next refresh.`);
       });
   }
 
@@ -241,6 +255,16 @@ export default function AdminConsole() {
         ))}
       </div>
 
+      {serverOnline ? (
+        <div style={{ background: '#064E3B', borderBottom: '1px solid #10B981', padding: '8px 24px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#A7F3D0', textAlign: 'center', letterSpacing: '0.02em' }}>
+          ● Shared server connected — showing everyone and everything from all devices.
+        </div>
+      ) : (
+        <div style={{ background: '#7F1D1D', borderBottom: '1px solid #DC2626', padding: '10px 24px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#FEE2E2', textAlign: 'center' }}>
+          ⚠ Offline — you can only see THIS browser's data. Start the shared server (<b>node server/index.js</b>) so everyone across all devices shows up, and verifying / editing works in every browser.
+        </div>
+      )}
+
       <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
         {verifyNotice !== '' && (
@@ -264,7 +288,7 @@ export default function AdminConsole() {
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{q.email} · {q.type} signup · {fmtDateTime(q.submitted)}</p>
                   </div>
                   <button
-                    onClick={() => approve(q.email)}
+                    onClick={() => approve(q)}
                     disabled={verifying === q.email}
                     style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: verifying === q.email ? '#6B7280' : '#1E7A4C', border: 'none', padding: '8px 16px', cursor: verifying === q.email ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
                   >
@@ -292,7 +316,7 @@ export default function AdminConsole() {
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{u.email} · signed up {fmtDateTime(u.joined)}</p>
                   </div>
                   <button
-                    onClick={() => approve(u.email)}
+                    onClick={() => approve(u)}
                     disabled={verifying === u.email}
                     style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: verifying === u.email ? '#6B7280' : '#1E7A4C', border: 'none', padding: '8px 16px', cursor: verifying === u.email ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
                   >
@@ -425,7 +449,7 @@ export default function AdminConsole() {
                           <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#34D399', whiteSpace: 'nowrap' }}>VERIFIED</span>
                         ) : (
                           <button
-                            onClick={() => approve(u.email)}
+                            onClick={() => approve(u)}
                             disabled={verifying === u.email}
                             style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: verifying === u.email ? '#6B7280' : '#EAB308', border: 'none', padding: '6px 14px', cursor: verifying === u.email ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
                           >

@@ -427,7 +427,8 @@ app.post('/api/admin/simulate-deposit', adminMiddleware, (req, res) => {
 });
 
 // Admin can set any user's balance directly. Stored server-side so the value
-// survives and is returned to the customer on their next sign-in / refresh.
+// survives and is returned to the customer on their next sign-in / refresh,
+// and every admin browser sees the same figure.
 app.post('/api/admin/users/:id/balance', adminMiddleware, (req, res) => {
   const user = db.users.find(u => u.id === req.params.id);
   if (!user) return res.status(404).json({ error:'User not found' });
@@ -436,6 +437,17 @@ app.post('/api/admin/users/:id/balance', adminMiddleware, (req, res) => {
   user.balance = Math.round(b * 100) / 100;
   saveDB(db);
   res.json({ ok:true, balance:user.balance });
+});
+
+// Admin can verify any user. Because it works against the shared server store,
+// it applies no matter which browser the account was created in.
+app.post('/api/admin/users/:id/verify', adminMiddleware, (req, res) => {
+  const user = db.users.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error:'User not found' });
+  user.kycStatus = 'approved';
+  user.status = 'active';
+  saveDB(db);
+  res.json({ ok:true, status:'approved', email:user.email, name:user.name });
 });
 
 app.post('/api/admin/login', (req, res) => {

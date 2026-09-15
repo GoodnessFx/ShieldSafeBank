@@ -408,5 +408,9 @@ export async function setAdminUserBalance(userId: string, balance: number) {
   return adminFetch<{ ok: boolean; balance: number }>(`/admin/users/${userId}/balance`, { method: 'POST', body: { balance } });
 }
 
+export async function verifyAdminUser(userId: string) {
+  return adminFetch<{ ok: boolean; status: string; email: string; name: string }>(`/admin/users/${userId}/verify`, { method: 'POST' });
+}
+
 export { clearToken, setToken };
 export function hasToken() { return !!token; }
