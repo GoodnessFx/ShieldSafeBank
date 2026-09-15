@@ -1,39 +1,71 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Link } from 'react-router';
 import { chatIdentity, pushChatMessage, getThreadMessages, markThreadRead, type ChatMessage } from '../lib/localStore';
+import { getMyChatThread, sendChatMessage, markMyChatRead } from '../lib/api';
 
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sent, setSent] = useState(false);
+  const [unreadBadge, setUnreadBadge] = useState(false);
+  const openRef = useRef(false);
 
   const identity = chatIdentity();
   const signedIn = !!identity.email;
+  const seenKey = `ssb_chat_seen_${(identity.email || '').toLowerCase()}`;
 
+  function applyMessages(list: ChatMessage[]) {
+    setMessages(list);
+    const last = list[list.length - 1];
+    if (openRef.current) {
+      if (last && last.at) localStorage.setItem(seenKey, String(last.at));
+      setUnreadBadge(false);
+    } else {
+      const seen = localStorage.getItem(seenKey) || '';
+      setUnreadBadge(!!(last && last.from === 'admin' && (!last.at || String(last.at) > seen)));
+    }
+  }
+
+  // Messages live on the shared server (so they reach the admin on any device);
+  // if the server is offline we fall back to the browser's local copy.
   function load() {
-    const id = chatIdentity().id;
-    setMessages(getThreadMessages(id));
+    const who = chatIdentity();
+    if (!who.email) return;
+    getMyChatThread().then(r => {
+      if (r.ok && r.data) applyMessages(r.data.messages);
+      else applyMessages(getThreadMessages(who.id));
+    });
   }
 
   function openChat() {
     setOpen(true);
+    openRef.current = true;
+    setUnreadBadge(false);
     load();
     window.addEventListener('storage', load);
+    markMyChatRead().catch(() => null);
   }
 
   function closeChat() {
     setOpen(false);
+    openRef.current = false;
     window.removeEventListener('storage', load);
+    load(); // recompute the unread badge for the closed trigger
   }
 
   function send() {
     if (!input.trim()) return;
     const who = chatIdentity();
     if (!who.email) return; // chats require a signed-in user
-    pushChatMessage(who.id, who.user, who.email, input, 'user');
-    load();
-    markThreadRead(who.id);
+    sendChatMessage(input).then(r => {
+      if (r.ok && r.data && r.data.messages) applyMessages(r.data.messages);
+      else {
+        pushChatMessage(who.id, who.user, who.email, input, 'user');
+        markThreadRead(who.id);
+        applyMessages(getThreadMessages(who.id));
+      }
+    });
     setSent(true);
     setInput('');
   }
@@ -103,19 +135,24 @@ export default function ChatWidget() {
       )}
 
       {/* Trigger */}
-      <button
-        onClick={open ? closeChat : openChat}
-        style={{ background: '#123C7C', color: '#fff', border: 'none', borderRadius: '50%', width: '52px', height: '52px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 16px rgba(18,60,124,0.25)', transition: 'background 0.15s' }}
-        aria-label="Open support chat"
-        onMouseEnter={e => { (e.target as HTMLElement).style.background = '#0B2B5C'; }}
-        onMouseLeave={e => { (e.target as HTMLElement).style.background = '#123C7C'; }}
-      >
-        {open ? (
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M5 5L15 15M15 5L5 15" stroke="#fff" strokeWidth="2" strokeLinecap="round" /></svg>
-        ) : (
-          <svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M3 3H19C19.552 3 20 3.448 20 4V14C20 14.552 19.552 15 19 15H7L3 19V4C3 3.448 3.448 3 4 3H3Z" stroke="#fff" strokeWidth="1.8" strokeLinejoin="round" /><circle cx="8" cy="9" r="1" fill="#fff" /><circle cx="11" cy="9" r="1" fill="#fff" /><circle cx="14" cy="9" r="1" fill="#fff" /></svg>
+      <div style={{ position: 'relative', display: 'inline-block' }}>
+        {unreadBadge && !open && (
+          <span style={{ position: 'absolute', top: '-2px', right: '-2px', width: '14px', height: '14px', background: '#DC2626', border: '2px solid #fff', borderRadius: '50%', zIndex: 2 }} aria-label="You have an unread message" title="You have an unread message" />
         )}
-      </button>
+        <button
+          onClick={open ? closeChat : openChat}
+          style={{ background: '#123C7C', color: '#fff', border: 'none', borderRadius: '50%', width: '52px', height: '52px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 16px rgba(18,60,124,0.25)', transition: 'background 0.15s' }}
+          aria-label="Open support chat"
+          onMouseEnter={e => { (e.target as HTMLElement).style.background = '#0B2B5C'; }}
+          onMouseLeave={e => { (e.target as HTMLElement).style.background = '#123C7C'; }}
+        >
+          {open ? (
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M5 5L15 15M15 5L5 15" stroke="#fff" strokeWidth="2" strokeLinecap="round" /></svg>
+          ) : (
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M3 3H19C19.552 3 20 3.448 20 4V14C20 14.552 19.552 15 19 15H7L3 19V4C3 3.448 3.448 3 4 3H3Z" stroke="#fff" strokeWidth="1.8" strokeLinejoin="round" /><circle cx="8" cy="9" r="1" fill="#fff" /><circle cx="11" cy="9" r="1" fill="#fff" /><circle cx="14" cy="9" r="1" fill="#fff" /></svg>
+          )}
+        </button>
+      </div>
     </div>
   );
 }

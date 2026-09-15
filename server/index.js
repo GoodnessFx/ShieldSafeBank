@@ -107,7 +107,18 @@ function normalizeDB(db) {
   });
   store.kycQueue = Array.isArray(store.kycQueue) ? store.kycQueue : [];
   store.threads = Array.isArray(store.threads) ? store.threads : [];
+  store.threads.forEach(t => {
+    t.user = t.user || '';
+    t.email = t.email || '';
+    t.preview = t.preview || '';
+    t.time = t.time || '';
+    t.at = t.at || '';
+    t.unread = !!t.unread;
+  });
   store.messages = store.messages && typeof store.messages === 'object' ? store.messages : {};
+  Object.keys(store.messages).forEach(id => {
+    store.messages[id] = Array.isArray(store.messages[id]) ? store.messages[id].map(m => ({ ...m, time: m.time || '', at: m.at || '' })) : [];
+  });
   store.supportMessages = Array.isArray(store.supportMessages) ? store.supportMessages : [];
   store.counters = store.counters && typeof store.counters === 'object' ? store.counters : {};
   return store;
@@ -276,6 +287,51 @@ app.post('/api/support/message', (req, res) => {
   res.json({ ok:true, message:'Message received.' });
 });
 
+/** Finds (or creates) the shared chat thread for the signed-in user. Stored in
+ * the same server database the admin console reads, so a customer on any device
+ * reaches the admin, and admin replies follow the customer back. */
+function ensureUserThread(user) {
+  let thread = (db.threads || []).find(t => t.userId === user.id);
+  if (!thread) {
+    thread = {
+      id: nextId(db, 'thread'), userId: user.id, user: user.name || user.email,
+      email: user.email, preview: '', time: '', at: new Date().toISOString(), unread: false,
+    };
+    db.threads.push(thread);
+  }
+  return thread;
+}
+
+app.get('/api/chat/thread', authMiddleware, (req, res) => {
+  const thread = (db.threads || []).find(t => t.userId === req.user.id);
+  res.json({
+    thread: thread ? { id: thread.id, user: thread.user, email: thread.email, unread: !!thread.unread } : null,
+    messages: thread ? (db.messages[thread.id] || []) : [],
+  });
+});
+
+app.post('/api/chat/send', authMiddleware, (req, res) => {
+  const text = (req.body && typeof req.body.text === 'string' && req.body.text.trim()) || '';
+  if (!text) return res.status(400).json({ error: 'Message cannot be empty.' });
+  const thread = ensureUserThread(req.user);
+  if (!db.messages[thread.id]) db.messages[thread.id] = [];
+  const at = new Date().toISOString();
+  const msg = { from: 'user', text, time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }), at };
+  db.messages[thread.id].push(msg);
+  thread.preview = text;
+  thread.time = msg.time;
+  thread.at = at;
+  thread.unread = true; // a new customer message for the admin to see
+  saveDB(db);
+  res.json({ ok: true, thread: { id: thread.id, user: thread.user, email: thread.email, unread: true }, messages: db.messages[thread.id] });
+});
+
+app.post('/api/chat/read', authMiddleware, (req, res) => {
+  const thread = (db.threads || []).find(t => t.userId === req.user.id);
+  if (thread) { thread.unread = false; saveDB(db); }
+  res.json({ ok: true });
+});
+
 app.get('/api/admin/users', adminMiddleware, (_, res) => {
   const users = db.users.map(u => ({
     id:u.id, name:u.name, email:u.email, accountNumber:u.accountNumber,
@@ -335,11 +391,19 @@ app.post('/api/admin/threads/:id/reply', adminMiddleware, (req, res) => {
   const { text } = req.body;
   const id = req.params.id;
   if (!db.messages[id]) db.messages[id] = [];
+  const at = new Date().toISOString();
   const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-  db.messages[id].push({ from:'admin', text, time });
+  db.messages[id].push({ from:'admin', text, time, at });
   const thread = db.threads.find(t => t.id === id);
-  if (thread) { thread.preview = text; thread.time = time; thread.unread = false; }
+  if (thread) { thread.preview = text; thread.time = time; thread.at = at; thread.unread = false; }
   saveDB(db);
+  res.json({ ok:true, messages: db.messages[id] });
+});
+
+// Marks a thread as read so its unread badge clears on the admin console.
+app.post('/api/admin/threads/:id/read', adminMiddleware, (req, res) => {
+  const thread = db.threads.find(t => t.id === req.params.id);
+  if (thread) { thread.unread = false; saveDB(db); }
   res.json({ ok:true });
 });
 

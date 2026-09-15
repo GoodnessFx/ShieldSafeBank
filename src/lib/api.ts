@@ -276,6 +276,32 @@ export async function submitSupportMessage(data: { name: string; email: string; 
   return apiFetch('/support/message', { method: 'POST', body: data });
 }
 
+export interface ChatMessageData {
+  from: 'admin' | 'user';
+  text: string;
+  time: string;
+  at: string;
+}
+
+export interface MyChatResult {
+  thread: { id: string; user: string; email: string; unread: boolean } | null;
+  messages: ChatMessageData[];
+}
+
+// Customer chat is stored on the shared server so anyone anywhere (any browser /
+// device) reaches the admin console, and admin replies follow the customer back.
+export async function getMyChatThread() {
+  return apiFetch<MyChatResult>('/chat/thread');
+}
+
+export async function sendChatMessage(text: string) {
+  return apiFetch<{ ok: boolean; thread?: { id: string; user: string; email: string; unread: boolean }; messages?: ChatMessageData[] }>('/chat/send', { method: 'POST', body: { text } });
+}
+
+export async function markMyChatRead() {
+  return apiFetch('/chat/read', { method: 'POST' });
+}
+
 let adminToken = sessionStorage.getItem('ssb_admin_token') || '';
 
 function setAdminToken(t: string) {
@@ -359,15 +385,19 @@ export async function toggleHold(id: string) {
 }
 
 export async function getAdminThreads() {
-  return adminFetch<{ id: string; user: string; preview: string; time: string; unread: boolean }[]>('/admin/threads');
+  return adminFetch<{ id: string; user: string; email?: string; preview: string; time: string; at?: string; unread: boolean }[]>('/admin/threads');
 }
 
 export async function getAdminMessages(threadId: string) {
-  return adminFetch<{ from: string; text: string; time: string }[]>(`/admin/threads/${threadId}/messages`);
+  return adminFetch<ChatMessageData[]>(`/admin/threads/${threadId}/messages`);
 }
 
 export async function replyThread(threadId: string, text: string) {
-  return adminFetch(`/admin/threads/${threadId}/reply`, { method: 'POST', body: { text } });
+  return adminFetch<{ ok: boolean; messages?: ChatMessageData[] }>(`/admin/threads/${threadId}/reply`, { method: 'POST', body: { text } });
+}
+
+export async function markAdminThreadRead(threadId: string) {
+  return adminFetch(`/admin/threads/${threadId}/read`, { method: 'POST' });
 }
 
 export async function simulateDeposit(userId: string, asset: string, amount: number) {

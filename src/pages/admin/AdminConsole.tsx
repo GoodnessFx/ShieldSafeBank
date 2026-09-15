@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, type ChatThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
-import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance } from '../../lib/api';
+import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
+import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, getAdminThreads, getAdminMessages, replyThread, markAdminThreadRead } from '../../lib/api';
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
 import BrandMark from '../../components/BrandMark';
@@ -13,6 +13,29 @@ type Tab = 'chat' | 'users' | 'activity' | 'deposits';
  * misses anyone who has signed up. `serverId` links a row to its server record. */
 type AdminUserRow = StoreUser & { serverId?: string };
 
+/** A conversation row in the admin Chat Inbox. `at` is the ISO timestamp of the
+ * last message so we can show send/read times and render a red unread badge. */
+type AdminThread = {
+  id: string;
+  user: string;
+  email: string;
+  preview: string;
+  time: string;
+  at: string;
+  unread: boolean;
+};
+
+function fmtShortTime(at?: string): string {
+  if (!at) return '';
+  const d = new Date(at);
+  if (isNaN(d.getTime())) return '';
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const hm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (sameDay) return hm;
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
 function parseServerBalance(value: string): number {
   const n = parseFloat(String(value || '').replace(/[^0-9.-]/g, ''));
   return Number.isFinite(n) ? n : 0;
@@ -23,7 +46,7 @@ export default function AdminConsole() {
   const [tab, setTab] = useState<Tab>('chat');
   const [activeThread, setActiveThread] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState('');
-  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [threads, setThreads] = useState<AdminThread[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
@@ -33,6 +56,7 @@ export default function AdminConsole() {
   const [copied, setCopied] = useState<string>('');
   const [editingBalance, setEditingBalance] = useState<string | null>(null);
   const [balanceInput, setBalanceInput] = useState('');
+  const [unreadCount, setUnreadCount] = useState(0);
 
   async function reload() {
     // Everyone who has signed up locally, combined with anyone stored on the
@@ -69,32 +93,74 @@ export default function AdminConsole() {
 
     setActivity(getActivity());
     setKycQueue(getKycQueue());
-    setThreads(getThreads());
+    const threadsNow = await loadThreads();
     if (activeThread) {
-      setMessages(getThreadMessages(activeThread));
+      setMessages(await loadMessages(activeThread));
       markThreadRead(activeThread);
-    } else if (getThreads().length > 0) {
-      const first = getThreads()[0].id;
+    } else if (threadsNow.length > 0) {
+      const first = threadsNow[0].id;
       setActiveThread(first);
-      setMessages(getThreadMessages(first));
-      markThreadRead(first);
+      setMessages(await loadMessages(first));
     }
   }
 
-  function selectThread(id: string) {
-    setActiveThread(id);
-    setMessages(getThreadMessages(id));
-    markThreadRead(id);
-    setThreads(getThreads());
+  // Conversations come from the shared server so chats from any device reach the
+  // admin; if the server is offline we fall back to the browser's local copy.
+  async function loadThreads(): Promise<AdminThread[]> {
+    const localThreads = getThreads();
+    let serverThreads: AdminThread[] = [];
+    try {
+      const tr = await getAdminThreads();
+      if (tr.ok && tr.data) {
+        serverThreads = tr.data.map(t => ({
+          id: t.id,
+          user: t.user,
+          email: t.email || '',
+          preview: t.preview || '',
+          time: t.time || '',
+          at: t.at || '',
+          unread: !!t.unread,
+        }));
+      }
+    } catch {
+      serverThreads = [];
+    }
+    const byId = new Map<string, AdminThread>();
+    for (const s of serverThreads) byId.set(s.id, s);
+    for (const l of localThreads) {
+      if (!byId.has(l.id)) byId.set(l.id, { id: l.id, user: l.user, email: l.email, preview: l.preview, time: l.time, at: l.at, unread: !!l.unread });
+    }
+    const merged = Array.from(byId.values()).sort((a, b) => (a.at || '') < (b.at || '') ? 1 : (a.at || '') > (b.at || '') ? -1 : 0);
+    setThreads(merged);
+    setUnreadCount(merged.filter(t => t.unread).length);
+    return merged;
   }
 
-  function sendReply() {
-    if (!chatInput.trim() || !activeThread) return;
-    const thread = getThreads().find(t => t.id === activeThread);
-    pushChatMessage(activeThread, thread ? thread.user : 'Customer', thread ? thread.email : '', chatInput, 'admin');
+  async function loadMessages(id: string): Promise<ChatMessage[]> {
+    try {
+      const r = await getAdminMessages(id);
+      if (r.ok && r.data) return r.data;
+    } catch { /* fall back below */ }
+    return getThreadMessages(id);
+  }
+
+  async function selectThread(id: string) {
+    setActiveThread(id);
+    setMessages(await loadMessages(id));
+    markAdminThreadRead(id).catch(() => null);
+    markThreadRead(id);
+    await loadThreads();
+  }
+
+  async function sendReply() {
+    const text = chatInput.trim();
+    if (!text || !activeThread) return;
+    const thread = threads.find(t => t.id === activeThread) || getThreads().find(t => t.id === activeThread);
+    await replyThread(activeThread, text);
+    pushChatMessage(activeThread, thread ? thread.user : 'Customer', thread ? thread.email : '', text, 'admin');
     markThreadRead(activeThread);
-    setMessages(getThreadMessages(activeThread));
-    setThreads(getThreads());
+    setMessages(await loadMessages(activeThread));
+    await loadThreads();
     setChatInput('');
   }
 
@@ -165,6 +231,9 @@ export default function AdminConsole() {
           <button key={t.key} onClick={() => { setTab(t.key); reload(); }}
             style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', padding: '12px 20px', background: 'none', border: 'none', borderBottom: tab === t.key ? '2px solid #4779C4' : '2px solid transparent', color: tab === t.key ? '#fff' : '#6B7280', cursor: 'pointer', letterSpacing: '0.04em', transition: 'color 0.12s', display: 'flex', alignItems: 'center', gap: '6px' }}>
             {t.label}
+            {t.key === 'chat' && unreadCount > 0 && (
+              <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, background: '#DC2626', color: '#fff', padding: '1px 6px', borderRadius: '8px', animation: 'pulse 1.2s infinite' }}>{unreadCount}</span>
+            )}
             {t.key === 'users' && pendingUsers.length > 0 && (
               <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, background: '#EAB308', color: '#0A2044', padding: '1px 6px', borderRadius: '8px' }}>{pendingUsers.length}</span>
             )}
@@ -245,13 +314,15 @@ export default function AdminConsole() {
               ) : threads.map(thread => (
                 <button key={thread.id} onClick={() => selectThread(thread.id)}
                   style={{ width: '100%', textAlign: 'left', padding: '14px 16px', background: activeThread === thread.id ? '#123C7C' : 'none', border: 'none', borderBottom: '1px solid #123C7C', cursor: 'pointer' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 600, color: '#fff' }}>{thread.user}</span>
-                    <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#6B7280' }}>{thread.time}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: thread.unread ? 700 : 600, color: thread.unread ? '#fff' : '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {thread.unread && <span style={{ width: '8px', height: '8px', background: '#DC2626', borderRadius: '50%', flexShrink: 0 }} />}
+                      {thread.user}
+                    </span>
+                    <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: thread.unread ? '#F87171' : '#6B7280', whiteSpace: 'nowrap' }}>{fmtShortTime(thread.at) || thread.time}</span>
                   </div>
                   {thread.email && <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#6B7280', margin: '0 0 4px' }}>{thread.email}</p>}
-                  <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{thread.preview}</p>
-                  {thread.unread && <div style={{ width: '6px', height: '6px', background: '#4779C4', borderRadius: '50%', marginTop: '6px' }} />}
+                  <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: thread.unread ? '#A9C6E8' : '#6B7280', fontWeight: thread.unread ? 600 : 400, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{thread.preview}</p>
                 </button>
               ))}
             </div>
@@ -265,7 +336,7 @@ export default function AdminConsole() {
                   <div key={i} style={{ display: 'flex', flexDirection: m.from === 'admin' ? 'row-reverse' : 'row', gap: '10px', alignItems: 'flex-end' }}>
                     <div style={{ maxWidth: '72%', background: m.from === 'admin' ? '#123C7C' : '#0B2B5C', border: '1px solid #123C7C', padding: '10px 14px' }}>
                       <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#E5E7EB', margin: '0 0 4px', lineHeight: 1.5 }}>{m.text}</p>
-                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#6B7280', margin: 0, textAlign: m.from === 'admin' ? 'right' : 'left' }}>{m.time}</p>
+                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#6B7280', margin: 0, textAlign: m.from === 'admin' ? 'right' : 'left' }}>{fmtShortTime(m.at) || m.time}</p>
                     </div>
                   </div>
                 ))}

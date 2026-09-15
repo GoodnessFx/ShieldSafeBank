@@ -280,6 +280,12 @@ body {
   }
 }
 
+/* Red pulsing dot for the admin panel's unread-message badge */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
