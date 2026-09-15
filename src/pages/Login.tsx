@@ -39,21 +39,21 @@ export default function Login() {
 
   return (
     <>
-      <title>Log In — Shield Safe Bank</title>
+      <title>Log In | Shield Safe Bank</title>
       <div style={{ minHeight: 'calc(100vh - 120px)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F4F6F8', padding: '40px 16px' }}>
         <div style={{ width: '100%', maxWidth: '400px' }}>
           <div className="auth-card" style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '40px' }}>
             <div style={{ textAlign: 'center', marginBottom: '20px' }}>
               <BrandMark height={46} />
             </div>
-            <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '24px', color: '#0F2338', margin: '0 0 6px', letterSpacing: '-0.01em' }}>Log in</h1>
+            <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '24px', color: '#0A2044', margin: '0 0 6px', letterSpacing: '-0.01em' }}>Log in</h1>
             <p style={{ fontSize: '14px', color: '#6B7280', margin: '0 0 28px' }}>
-              No account? <Link to="/signup" style={{ color: '#1B3A5C', fontWeight: 500 }}>Open one</Link>
+              No account? <Link to="/signup" style={{ color: '#123C7C', fontWeight: 500 }}>Open one</Link>
             </p>
 
             <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <button type="button" onClick={handleGoogle} disabled={loading}
-                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', border: '1px solid #DCE3EA', background: '#fff', padding: '11px', fontSize: '14px', fontWeight: 500, color: '#0F2338', cursor: 'pointer', transition: 'background 0.15s', opacity: loading ? 0.6 : 1 }}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', border: '1px solid #DCE3EA', background: '#fff', padding: '11px', fontSize: '14px', fontWeight: 500, color: '#0A2044', cursor: 'pointer', transition: 'background 0.15s', opacity: loading ? 0.6 : 1 }}
                 onMouseEnter={e => { (e.target as HTMLElement).style.background = '#F4F6F8'; }}
                 onMouseLeave={e => { (e.target as HTMLElement).style.background = '#fff'; }}>
                 {googleSvg()} Continue with Google
@@ -69,7 +69,7 @@ export default function Login() {
               <button type="submit" disabled={loading} className="btn-primary" style={{ padding: '12px', fontSize: '15px', opacity: loading ? 0.6 : 1 }}>
                 {loading ? 'Checking…' : 'Log in'}
               </button>
-              <Link to="/forgot-password" style={{ fontSize: '13px', color: '#4A7DA8', textDecoration: 'none', textAlign: 'center' }}>Forgot password?</Link>
+              <Link to="/forgot-password" style={{ fontSize: '13px', color: '#4779C4', textDecoration: 'none', textAlign: 'center' }}>Forgot password?</Link>
             </form>
           </div>
         </div>
@@ -83,9 +83,9 @@ function AuthField({ label, type, value, onChange, inputMode, maxLength }: {
 }) {
   return (
     <div>
-      <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4A7DA8', display: 'block', marginBottom: '6px' }}>{label}</label>
+      <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4779C4', display: 'block', marginBottom: '6px' }}>{label}</label>
       <input type={type} value={value} onChange={e => onChange(e.target.value)} inputMode={inputMode} maxLength={maxLength}
-        style={{ width: '100%', border: '1px solid #DCE3EA', padding: '11px 12px', fontSize: '15px', color: '#0F2338', background: '#fff', outline: 'none' }} />
+        style={{ width: '100%', border: '1px solid #DCE3EA', padding: '11px 12px', fontSize: '15px', color: '#0A2044', background: '#fff', outline: 'none' }} />
     </div>
   );
 }

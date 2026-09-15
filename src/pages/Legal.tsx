@@ -9,18 +9,18 @@ export default function Legal() {
 
   return (
     <>
-      <title>{titles[section]} — Shield Safe Bank</title>
+      <title>{titles[section]} | Shield Safe Bank</title>
       <meta name="description" content={`Shield Safe Bank ${titles[section]}.`} />
 
       <section style={{ background: '#F4F6F8', borderBottom: '1px solid #DCE3EA', padding: '40px 0 0' }}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 800, fontSize: 'clamp(28px, 3.5vw, 44px)', color: '#0F2338', margin: '0 0 24px', letterSpacing: '-0.02em' }}>Legal</h1>
+          <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 800, fontSize: 'clamp(28px, 3.5vw, 44px)', color: '#0A2044', margin: '0 0 24px', letterSpacing: '-0.02em' }}>Legal</h1>
           <div className="legal-tabs" style={{ display: 'flex', gap: 0 }}>
             {sections.map(s => (
               <button
                 key={s}
                 onClick={() => setParams({ section: s })}
-                style={{ padding: '12px 24px', background: section === s ? '#fff' : 'transparent', border: '1px solid #DCE3EA', borderBottom: section === s ? '1px solid #fff' : '1px solid #DCE3EA', marginBottom: section === s ? '-1px' : 0, fontFamily: 'Sora, sans-serif', fontWeight: section === s ? 600 : 400, fontSize: '14px', color: section === s ? '#0F2338' : '#6B7280', cursor: 'pointer', position: 'relative', zIndex: section === s ? 1 : 0 }}
+                style={{ padding: '12px 24px', background: section === s ? '#fff' : 'transparent', border: '1px solid #DCE3EA', borderBottom: section === s ? '1px solid #fff' : '1px solid #DCE3EA', marginBottom: section === s ? '-1px' : 0, fontFamily: 'Sora, sans-serif', fontWeight: section === s ? 600 : 400, fontSize: '14px', color: section === s ? '#0A2044' : '#6B7280', cursor: 'pointer', position: 'relative', zIndex: section === s ? 1 : 0 }}
               >
                 {titles[s]}
               </button>
@@ -43,7 +43,7 @@ export default function Legal() {
 function LegalSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: '36px' }}>
-      <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#0F2338', marginBottom: '12px' }}>{title}</h2>
+      <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#0A2044', marginBottom: '12px' }}>{title}</h2>
       <div style={{ fontSize: '14px', color: '#374151', lineHeight: 1.8, display: 'flex', flexDirection: 'column', gap: '10px' }}>{children}</div>
     </div>
   );

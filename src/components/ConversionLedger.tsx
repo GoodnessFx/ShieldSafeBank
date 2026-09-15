@@ -51,7 +51,7 @@ export default function ConversionLedger() {
     <div style={{ border: '1px solid #DCE3EA', background: '#fff', maxWidth: '480px', width: '100%' }}>
       {/* Header row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid #DCE3EA', background: '#F4F6F8' }}>
-        <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4A7DA8' }}>Conversion Ledger</span>
+        <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4779C4' }}>Conversion Ledger</span>
         <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280' }}>
           Updated {lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </span>
@@ -67,7 +67,7 @@ export default function ConversionLedger() {
               style={{
                 flex: 1,
                 padding: '8px',
-                background: asset === a ? '#1B3A5C' : '#fff',
+                background: asset === a ? '#123C7C' : '#fff',
                 color: asset === a ? '#fff' : '#6B7280',
                 border: 'none',
                 fontFamily: 'IBM Plex Mono, monospace',
@@ -100,14 +100,14 @@ export default function ConversionLedger() {
                 fontFamily: 'IBM Plex Mono, monospace',
                 fontSize: '22px',
                 fontWeight: 600,
-                color: '#0F2338',
+                color: '#0A2044',
                 background: 'transparent',
                 outline: 'none',
                 width: '100%',
               }}
               aria-label={`Amount in ${asset}`}
             />
-            <span style={{ padding: '0 14px', fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '14px', color: '#4A7DA8' }}>{asset}</span>
+            <span style={{ padding: '0 14px', fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '14px', color: '#4779C4' }}>{asset}</span>
           </div>
         </div>
 
@@ -115,7 +115,7 @@ export default function ConversionLedger() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '14px 0' }}>
           <div style={{ flex: 1, height: '1px', background: '#DCE3EA' }} />
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M8 2v12M4 10l4 4 4-4" stroke="#4A7DA8" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" />
+            <path d="M8 2v12M4 10l4 4 4-4" stroke="#4779C4" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" />
           </svg>
           <div style={{ flex: 1, height: '1px', background: '#DCE3EA' }} />
         </div>
@@ -150,7 +150,7 @@ export default function ConversionLedger() {
 
 function LedgerRow({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontFamily: 'IBM Plex Mono, monospace', color: bold ? '#0F2338' : '#6B7280', fontWeight: bold ? 600 : 400 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontFamily: 'IBM Plex Mono, monospace', color: bold ? '#0A2044' : '#6B7280', fontWeight: bold ? 600 : 400 }}>
       <span>{label}</span>
       <span style={{ textAlign: 'right' }}>{value}</span>
     </div>

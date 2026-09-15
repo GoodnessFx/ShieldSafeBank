@@ -4,10 +4,10 @@
 @import 'tailwindcss';
 
 @theme inline {
-  --color-navy: #1B3A5C;
-  --color-deep-navy: #12283F;
-  --color-steel: #4A7DA8;
-  --color-ink: #0F2338;
+  --color-navy: #123C7C;
+  --color-deep-navy: #0B2B5C;
+  --color-steel: #4779C4;
+  --color-ink: #0A2044;
   --color-fog: #F4F6F8;
   --color-border: #DCE3EA;
   --color-success: #1E7A4C;
@@ -24,7 +24,7 @@
 
 html {
   font-family: var(--font-body);
-  color: #0F2338;
+  color: #0A2044;
   background: #FFFFFF;
   -webkit-font-smoothing: antialiased;
 }
@@ -213,14 +213,14 @@ body {
 
 /* Focus ring */
 *:focus-visible {
-  outline: 2px solid #4A7DA8;
+  outline: 2px solid #4779C4;
   outline-offset: 2px;
 }
 
 /* Global button style */
 .btn-primary {
   display: inline-block;
-  background: #1B3A5C;
+  background: #123C7C;
   color: #fff;
   border: none;
   padding: 10px 24px;
@@ -234,7 +234,50 @@ body {
   border-radius: 0;
 }
 .btn-primary:hover {
-  background: #12283F;
+  background: #0B2B5C;
+}
+
+/* Splash screen */
+@keyframes ssb-splash-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes ssb-splash-progress {
+  from { width: 0%; }
+  to { width: 100%; }
+}
+
+/* Card scanner */
+@keyframes ssb-capture-flash {
+  0% { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+@keyframes ssb-scan-sweep {
+  0% { top: 4%; }
+  50% { top: 92%; }
+  100% { top: 4%; }
+}
+@keyframes ssb-pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(71, 121, 196, 0.5); }
+  100% { box-shadow: 0 0 0 14px rgba(71, 121, 196, 0); }
+}
+@keyframes ssb-fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Foreign exchange: stack converter and rate table on narrow screens */
+@media (max-width: 900px) {
+  .fx-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Dashboard card scan grid: stack on mobile */
+@media (max-width: 767px) {
+  .card-scan-grid {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

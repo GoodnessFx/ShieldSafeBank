@@ -13,7 +13,7 @@ const FAQ: Record<string, { q: string; a: string }[]> = {
     { q: 'When is the exchange rate locked?', a: "At the moment your transaction reaches the required confirmation count on-chain. Not when you initiate the send, and not when you withdraw." },
   ],
   'Withdrawals': [
-    { q: 'How do I withdraw?', a: "Link a US bank account (ACH or wire) or a US Visa/Mastercard debit card from your dashboard. Submit a withdrawal request. ACH takes 1–3 business days. Wire is same-day if submitted before 2pm EST. Debit card posts within minutes." },
+    { q: 'How do I withdraw?', a: "Link a US bank account (ACH or wire) or a US Visa/Mastercard debit card from your dashboard. Submit a withdrawal request. ACH takes one to three business days. Wire is same-day if submitted before 2pm EST. Debit card posts within minutes." },
     { q: 'Is there a minimum withdrawal?', a: "Yes. $10.00 for all withdrawal methods." },
     { q: 'What if my withdrawal exceeds my balance?', a: "The withdrawal form will show your available balance and reject the request inline if the amount is above it. There is no processing fee for a rejected withdrawal." },
   ],
@@ -24,10 +24,10 @@ const FAQ: Record<string, { q: string; a: string }[]> = {
   ],
   'Fees': [
     { q: 'Is there a fee to open an account?', a: "No." },
-    { q: 'What is the conversion fee?', a: "0.50% of gross USD value for BTC. 0.30% for USDT. Business accounts pay 0.40% (BTC) and 0.25% (USDT). The exchange rate itself has no markup — it is mid-market at confirmation." },
+    { q: 'What is the conversion fee?', a: "0.50% of gross USD value for BTC. 0.30% for USDT. Business accounts pay 0.40% (BTC) and 0.25% (USDT). The exchange rate itself has no markup. It is mid-market at confirmation." },
   ],
   'Verification': [
-    { q: 'How long does verification take?', a: "Personal accounts: typically within one business day. Business accounts: 1–2 business days depending on document complexity." },
+    { q: 'How long does verification take?', a: "Personal accounts: typically within one business day. Business accounts: one to two business days depending on document complexity." },
     { q: 'What does the liveness check involve?', a: "A brief video selfie, about 90 seconds. It is matched against your ID photo automatically. You do not need to schedule a call." },
     { q: 'My verification is pending. Can I deposit?', a: "No. Deposit addresses are issued only after verification is complete. Your dashboard will show a clear verification-in-progress state." },
   ],
@@ -41,13 +41,13 @@ export default function Support() {
 
   return (
     <>
-      <title>Support — Shield Safe Bank</title>
+      <title>Support | Shield Safe Bank</title>
       <meta name="description" content="Shield Safe Bank help center. Find answers about deposits, withdrawals, verification, security, and fees." />
 
       <section style={{ background: '#F4F6F8', borderBottom: '1px solid #DCE3EA', padding: '56px 0 48px' }}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4A7DA8', marginBottom: '16px' }}>Help Center</p>
-          <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 800, fontSize: 'clamp(32px, 4vw, 52px)', color: '#0F2338', margin: 0, letterSpacing: '-0.02em' }}>Support</h1>
+          <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', marginBottom: '16px' }}>Help Center</p>
+          <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 800, fontSize: 'clamp(32px, 4vw, 52px)', color: '#0A2044', margin: 0, letterSpacing: '-0.02em' }}>Support</h1>
         </div>
       </section>
 
@@ -60,7 +60,7 @@ export default function Support() {
                 <button
                   key={cat}
                   onClick={() => { setActive(cat); setOpenQ(null); }}
-                  style={{ textAlign: 'left', padding: '9px 14px', background: active === cat ? '#1B3A5C' : 'transparent', color: active === cat ? '#fff' : '#374151', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: active === cat ? 600 : 400, transition: 'background 0.12s, color 0.12s' }}
+                  style={{ textAlign: 'left', padding: '9px 14px', background: active === cat ? '#123C7C' : 'transparent', color: active === cat ? '#fff' : '#374151', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: active === cat ? 600 : 400, transition: 'background 0.12s, color 0.12s' }}
                 >
                   {cat}
                 </button>
@@ -69,7 +69,7 @@ export default function Support() {
 
             {/* FAQ */}
             <div className="col-span-3 faq-content" style={{ borderLeft: '1px solid #DCE3EA', paddingLeft: '32px' }}>
-              <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '22px', color: '#0F2338', marginBottom: '24px' }}>{active}</h2>
+              <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '22px', color: '#0A2044', marginBottom: '24px' }}>{active}</h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0, border: '1px solid #DCE3EA' }}>
                 {FAQ[active].map((item, i) => (
                   <div key={i} style={{ borderBottom: i < FAQ[active].length - 1 ? '1px solid #DCE3EA' : 'none' }}>
@@ -78,8 +78,8 @@ export default function Support() {
                       style={{ width: '100%', textAlign: 'left', padding: '16px 20px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}
                       aria-expanded={openQ === i}
                     >
-                      <span style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '15px', color: '#0F2338' }}>{item.q}</span>
-                      <span style={{ color: '#4A7DA8', fontSize: '18px', lineHeight: 1, flexShrink: 0 }}>{openQ === i ? '−' : '+'}</span>
+                      <span style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '15px', color: '#0A2044' }}>{item.q}</span>
+                      <span style={{ color: '#4779C4', fontSize: '18px', lineHeight: 1, flexShrink: 0 }}>{openQ === i ? '−' : '+'}</span>
                     </button>
                     {openQ === i && (
                       <div style={{ padding: '0 20px 20px', fontSize: '14px', color: '#4A5568', lineHeight: 1.75 }}>{item.a}</div>
@@ -95,7 +95,7 @@ export default function Support() {
       {/* Contact form */}
       <section style={{ padding: '64px 0', background: '#F4F6F8' }}>
         <div className="max-w-3xl mx-auto px-4 sm:px-6">
-          <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '26px', color: '#0F2338', marginBottom: '8px' }}>Still need help?</h2>
+          <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '26px', color: '#0A2044', marginBottom: '8px' }}>Still need help?</h2>
           <p style={{ fontSize: '15px', color: '#4A5568', marginBottom: '32px' }}>Send us a message. We respond within one business day.</p>
           {sent ? (
             <div style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '28px' }}>
@@ -109,20 +109,20 @@ export default function Support() {
                 <Field label="Email address" value={formState.email} onChange={v => setFormState(f => ({ ...f, email: v }))} type="email" required />
               </div>
               <div>
-                <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4A7DA8', display: 'block', marginBottom: '6px' }}>Category</label>
-                <select value={formState.category} onChange={e => setFormState(f => ({ ...f, category: e.target.value }))} style={{ width: '100%', border: '1px solid #DCE3EA', padding: '10px 12px', fontSize: '14px', background: '#fff', color: '#0F2338', outline: 'none' }}>
+                <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4779C4', display: 'block', marginBottom: '6px' }}>Category</label>
+                <select value={formState.category} onChange={e => setFormState(f => ({ ...f, category: e.target.value }))} style={{ width: '100%', border: '1px solid #DCE3EA', padding: '10px 12px', fontSize: '14px', background: '#fff', color: '#0A2044', outline: 'none' }}>
                   {['General', 'Deposits', 'Withdrawals', 'Security', 'Fees', 'Verification'].map(c => <option key={c}>{c}</option>)}
                 </select>
               </div>
               <div>
-                <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4A7DA8', display: 'block', marginBottom: '6px' }}>Message</label>
-                <textarea value={formState.message} onChange={e => setFormState(f => ({ ...f, message: e.target.value }))} required rows={5} style={{ width: '100%', border: '1px solid #DCE3EA', padding: '10px 12px', fontSize: '14px', background: '#fff', color: '#0F2338', outline: 'none', resize: 'vertical' }} />
+                <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4779C4', display: 'block', marginBottom: '6px' }}>Message</label>
+                <textarea value={formState.message} onChange={e => setFormState(f => ({ ...f, message: e.target.value }))} required rows={5} style={{ width: '100%', border: '1px solid #DCE3EA', padding: '10px 12px', fontSize: '14px', background: '#fff', color: '#0A2044', outline: 'none', resize: 'vertical' }} />
               </div>
-              <button type="submit" style={{ alignSelf: 'flex-start', background: '#1B3A5C', color: '#fff', border: 'none', padding: '12px 28px', fontWeight: 600, fontSize: '14px', cursor: 'pointer', transition: 'background 0.15s' }}>Send message</button>
+              <button type="submit" style={{ alignSelf: 'flex-start', background: '#123C7C', color: '#fff', border: 'none', padding: '12px 28px', fontWeight: 600, fontSize: '14px', cursor: 'pointer', transition: 'background 0.15s' }}>Send message</button>
             </form>
           )}
           <p style={{ marginTop: '24px', fontSize: '13px', color: '#6B7280', fontFamily: 'IBM Plex Mono, monospace' }}>
-            support@shieldsafebank.com &middot; Mon–Fri, 9am–6pm EST
+            support@shieldsafebank.com &middot; Monday to Friday, 9am to 6pm EST
           </p>
         </div>
       </section>
@@ -133,8 +133,8 @@ export default function Support() {
 function Field({ label, value, onChange, type, required }: { label: string; value: string; onChange: (v: string) => void; type: string; required?: boolean }) {
   return (
     <div>
-      <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4A7DA8', display: 'block', marginBottom: '6px' }}>{label}</label>
-      <input type={type} value={value} onChange={e => onChange(e.target.value)} required={required} style={{ width: '100%', border: '1px solid #DCE3EA', padding: '10px 12px', fontSize: '14px', background: '#fff', color: '#0F2338', outline: 'none' }} />
+      <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4779C4', display: 'block', marginBottom: '6px' }}>{label}</label>
+      <input type={type} value={value} onChange={e => onChange(e.target.value)} required={required} style={{ width: '100%', border: '1px solid #DCE3EA', padding: '10px 12px', fontSize: '14px', background: '#fff', color: '#0A2044', outline: 'none' }} />
     </div>
   );
 }

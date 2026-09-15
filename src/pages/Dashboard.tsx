@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../lib/config';
 import { getMe, getTransactions, requestWithdrawal, submitDeposit, type MeData, type TransactionData } from '../lib/api';
+import CardScanner, { readCardScan, writeCardScan, type CardScanResult } from '../components/CardScanner';
+import Toast, { type ToastData } from '../components/Toast';
 
 const BTC_ADDR = DEPOSIT_ADDRESSES.BTC;
 const USDT_ADDR = DEPOSIT_ADDRESSES['USDT-ERC20'];
@@ -63,7 +65,40 @@ export default function Dashboard() {
   const [depositError, setDepositError] = useState('');
   const [depositSent, setDepositSent] = useState(false);
   const [dLoading, setDLoading] = useState(false);
+  const [cardScan, setCardScan] = useState<CardScanResult | null>(null);
+  const [scanOpen, setScanOpen] = useState(false);
+  const [toasts, setToasts] = useState<ToastData[]>([]);
   const balance = useCountUp(balanceTarget, 1800);
+
+  function currentEmail(): string {
+    try {
+      const lu = JSON.parse(localStorage.getItem('ssb_local_user') || 'null');
+      if (lu && lu.email) return String(lu.email);
+    } catch {
+      // ignore
+    }
+    return '';
+  }
+
+  function pushToast(title: string, body: string, tone: ToastData['tone'] = 'success') {
+    const id = `t${Date.now()}`;
+    setToasts(prev => [...prev, { id, title, body, tone }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 7000);
+  }
+
+  function dismissToast(id: string) {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }
+
+  function handleCardComplete(result: CardScanResult) {
+    const email = user?.email || currentEmail();
+    if (email) writeCardScan(email, result);
+    setCardScan(result);
+    pushToast(
+      'Card scanned successfully',
+      `Front and back of your Shield Safe Bank card ending •••• ${result.last4} were captured and saved to your account.`,
+    );
+  }
 
   function logout() {
     localStorage.removeItem('ssb_auth');
@@ -79,6 +114,7 @@ export default function Dashboard() {
       if (!cancelled && me.ok && me.data) {
         setUser(me.data);
         setBalanceTarget(me.data.balance);
+        setCardScan(readCardScan(me.data.email));
       }
       const t = await getTransactions();
       if (!cancelled && t.ok && t.data) setTxs(t.data.map(mapTx));
@@ -137,35 +173,35 @@ export default function Dashboard() {
 
   return (
     <>
-      <title>Dashboard — Shield Safe Bank</title>
+      <title>Dashboard | Shield Safe Bank</title>
       <div style={{ background: '#F4F6F8', minHeight: 'calc(100vh - 56px)' }}>
 
         {/* Dashboard nav strip */}
-        <div style={{ background: '#12283F', borderBottom: '1px solid #0F2338' }}>
+        <div style={{ background: '#0B2B5C', borderBottom: '1px solid #0A2044' }}>
           <div className="max-w-6xl mx-auto px-4 sm:px-6 h-11 flex items-center justify-between">
             <nav className="dash-rail" style={{ display: 'flex', gap: '24px' }}>
-              {['Overview', 'Deposit', 'Withdraw', 'History'].map(t => (
-                <a key={t} href={`#${t.toLowerCase()}`} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#A8C4DA', textDecoration: 'none', letterSpacing: '0.04em', transition: 'color 0.12s' }}
+              {['Overview', 'My Card', 'Deposit', 'Withdraw', 'History'].map(t => (
+                <a key={t} href={`#${t === 'My Card' ? 'card' : t.toLowerCase()}`} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#A9C6E8', textDecoration: 'none', letterSpacing: '0.04em', transition: 'color 0.12s' }}
                   onMouseEnter={e => { (e.target as HTMLElement).style.color = '#fff'; }}
-                  onMouseLeave={e => { (e.target as HTMLElement).style.color = '#A8C4DA'; }}>
+                  onMouseLeave={e => { (e.target as HTMLElement).style.color = '#A9C6E8'; }}>
                   {t}
                 </a>
               ))}
             </nav>
-            <button onClick={logout} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#A8C4DA', background: 'none', border: 'none', cursor: 'pointer' }}>Log out</button>
+            <button onClick={logout} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#A9C6E8', background: 'none', border: 'none', cursor: 'pointer' }}>Log out</button>
           </div>
         </div>
 
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
           {/* Balance card */}
-          <div id="overview" className="dash-balance-card" style={{ background: '#1B3A5C', padding: '36px', display: 'grid', gridTemplateColumns: '1fr auto', gap: '20px', alignItems: 'center' }}>
+          <div id="overview" className="dash-balance-card" style={{ background: '#123C7C', padding: '36px', display: 'grid', gridTemplateColumns: '1fr auto', gap: '20px', alignItems: 'center' }}>
             <div>
-              <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4A7DA8', margin: '0 0 8px' }}>USD Balance</p>
+              <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', margin: '0 0 8px' }}>USD Balance</p>
               <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: 'clamp(36px, 5vw, 56px)', fontWeight: 600, color: '#fff', margin: '0 0 4px', letterSpacing: '-0.02em' }}>
                 {fmtUSD(balance)}
               </p>
-              <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#4A7DA8', margin: 0 }}>
+              <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#4779C4', margin: 0 }}>
                 As of {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
               </p>
             </div>
@@ -174,7 +210,67 @@ export default function Dashboard() {
                 <StatusPill label={user.kycStatus === 'approved' ? 'Verified' : user.kycStatus === 'in_review' || user.kycStatus === 'pending' ? 'Pending' : user.kycStatus === 'rejected' ? 'Rejected' : 'Active'}
                   color={user.kycStatus === 'approved' ? '#1E7A4C' : user.kycStatus === 'rejected' ? '#DC2626' : '#9A6B00'} />
               ) : <StatusPill label="Verified" color="#1E7A4C" />}
-              <StatusPill label="2FA Active" color="#1B3A5C" border />
+              <StatusPill label="2FA Active" color="#123C7C" border />
+            </div>
+          </div>
+
+          {/* Card verification */}
+          <div id="card" style={{ background: '#fff', border: '1px solid #DCE3EA', borderLeft: cardScan ? '1px solid #DCE3EA' : '4px solid #4779C4', padding: '28px', transition: 'border-color 0.2s' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap', marginBottom: '20px' }}>
+              <div>
+                <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#0A2044', margin: '0 0 4px' }}>Your Shield Safe Bank card</h2>
+                <p style={{ fontSize: '13px', color: '#6B7280', margin: 0 }}>
+                  Scan both sides to add your physical card to your account.
+                </p>
+              </div>
+              {cardScan ? (
+                <StatusPill label="Card verified" color="#1E7A4C" />
+              ) : (
+                <StatusPill label="Not scanned" color="#9A6B00" />
+              )}
+            </div>
+
+            <div className="card-scan-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 320px) 1fr', gap: '28px', alignItems: 'center' }}>
+              <CardVisual last4={cardScan ? cardScan.last4 : '••••'} />
+
+              <div>
+                {cardScan ? (
+                  <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', padding: '18px', marginBottom: '16px' }}>
+                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#166534', margin: 0, lineHeight: 1.8 }}>
+                      Front side captured<br />
+                      Back side captured<br />
+                      Saved {new Date(cardScan.scannedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                ) : (
+                  <ul style={{ margin: '0 0 18px', padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {[
+                      'You scan the front of the card first, then turn it over and scan the back.',
+                      'Both sides must be captured before your card is saved.',
+                      'Hold the card flat and fill the frame.',
+                    ].map(t => (
+                      <li key={t} style={{ display: 'flex', gap: '10px', fontSize: '13px', color: '#4A5568', lineHeight: 1.6 }}>
+                        <span style={{ color: '#4779C4', fontWeight: 700, flexShrink: 0 }}>•</span>
+                        <span>{t}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                <button
+                  onClick={() => setScanOpen(true)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#123C7C', color: '#fff', border: 'none', padding: '12px 22px', fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '14px', cursor: 'pointer', transition: 'background 0.15s' }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#0B2B5C'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = '#123C7C'; }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <rect x="1" y="4" width="14" height="9" rx="1" stroke="#fff" strokeWidth="1.3" />
+                    <circle cx="8" cy="8.5" r="2.4" stroke="#fff" strokeWidth="1.3" />
+                    <path d="M5.5 4l1-1.6h3L10.5 4" stroke="#fff" strokeWidth="1.3" strokeLinejoin="round" />
+                  </svg>
+                  {cardScan ? 'Scan card again' : 'Scan your card'}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -192,13 +288,13 @@ export default function Dashboard() {
           <div className="grid md:grid-cols-2 gap-6">
             {/* Deposit addresses */}
             <div id="deposit" style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '28px' }}>
-              <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#0F2338', margin: '0 0 4px' }}>Deposit address</h2>
+              <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#0A2044', margin: '0 0 4px' }}>Deposit address</h2>
               <p style={{ fontSize: '13px', color: '#6B7280', margin: '0 0 20px' }}>Send only the matching asset to each address.</p>
 
               <div style={{ display: 'flex', gap: 0, marginBottom: '16px', border: '1px solid #DCE3EA' }}>
                 {(['btc', 'usdt'] as const).map(t => (
                   <button key={t} onClick={() => setActiveTab(t)}
-                    style={{ flex: 1, padding: '8px', background: activeTab === t ? '#1B3A5C' : '#fff', color: activeTab === t ? '#fff' : '#6B7280', border: 'none', fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '13px', cursor: 'pointer', textTransform: 'uppercase', transition: 'background 0.12s, color 0.12s' }}>
+                    style={{ flex: 1, padding: '8px', background: activeTab === t ? '#123C7C' : '#fff', color: activeTab === t ? '#fff' : '#6B7280', border: 'none', fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '13px', cursor: 'pointer', textTransform: 'uppercase', transition: 'background 0.12s, color 0.12s' }}>
                     {t}
                   </button>
                 ))}
@@ -221,16 +317,16 @@ export default function Dashboard() {
               ) : (
                 <form onSubmit={handleDeposit} style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <div>
-                    <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4A7DA8', display: 'block', marginBottom: '6px' }}>Amount to deposit (USD value)</label>
+                    <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4779C4', display: 'block', marginBottom: '6px' }}>Amount to deposit (USD value)</label>
                     <div style={{ display: 'flex', border: '1px solid #DCE3EA', alignItems: 'center' }}>
                       <span style={{ padding: '0 12px', fontFamily: 'IBM Plex Mono, monospace', color: '#6B7280', fontSize: '16px' }}>$</span>
                       <input type="number" value={depositAmount} onChange={e => setDepositAmount(e.target.value)} min="0" step="0.01" placeholder="0.00"
-                        style={{ flex: 1, border: 'none', padding: '11px 8px 11px 0', fontFamily: 'IBM Plex Mono, monospace', fontSize: '18px', fontWeight: 600, color: '#0F2338', background: 'transparent', outline: 'none' }}
+                        style={{ flex: 1, border: 'none', padding: '11px 8px 11px 0', fontFamily: 'IBM Plex Mono, monospace', fontSize: '18px', fontWeight: 600, color: '#0A2044', background: 'transparent', outline: 'none' }}
                         aria-label="Deposit amount in USD" />
                     </div>
                   </div>
                   {depositError && <p style={{ fontSize: '13px', color: '#DC2626', margin: 0, fontWeight: 500 }}>{depositError}</p>}
-                  <button type="submit" disabled={dLoading} style={{ background: '#1B3A5C', color: '#fff', border: 'none', padding: '12px', fontWeight: 600, fontSize: '14px', cursor: 'pointer', transition: 'background 0.15s', opacity: dLoading ? 0.6 : 1 }}>
+                  <button type="submit" disabled={dLoading} style={{ background: '#123C7C', color: '#fff', border: 'none', padding: '12px', fontWeight: 600, fontSize: '14px', cursor: 'pointer', transition: 'background 0.15s', opacity: dLoading ? 0.6 : 1 }}>
                     {dLoading ? 'Recording…' : 'I have sent this amount'}
                   </button>
                 </form>
@@ -245,8 +341,8 @@ export default function Dashboard() {
 
             {/* Withdrawal */}
             <div id="withdraw" style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '28px' }}>
-              <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#0F2338', margin: '0 0 4px' }}>Withdraw USD</h2>
-              <p style={{ fontSize: '13px', color: '#6B7280', margin: '0 0 20px' }}>To linked bank account (ACH). Free, 1–3 business days.</p>
+              <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#0A2044', margin: '0 0 4px' }}>Withdraw USD</h2>
+              <p style={{ fontSize: '13px', color: '#6B7280', margin: '0 0 20px' }}>To linked bank account (ACH). Free, one to three business days.</p>
 
               {withdrawSent ? (
                 <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', padding: '20px' }}>
@@ -258,11 +354,11 @@ export default function Dashboard() {
               ) : (
                 <form onSubmit={handleWithdraw} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                   <div>
-                    <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4A7DA8', display: 'block', marginBottom: '6px' }}>Amount (USD)</label>
+                    <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4779C4', display: 'block', marginBottom: '6px' }}>Amount (USD)</label>
                     <div style={{ display: 'flex', border: '1px solid #DCE3EA', alignItems: 'center' }}>
                       <span style={{ padding: '0 12px', fontFamily: 'IBM Plex Mono, monospace', color: '#6B7280', fontSize: '16px' }}>$</span>
                       <input type="number" value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} min="10" step="0.01"
-                        style={{ flex: 1, border: 'none', padding: '11px 8px 11px 0', fontFamily: 'IBM Plex Mono, monospace', fontSize: '18px', fontWeight: 600, color: '#0F2338', background: 'transparent', outline: 'none' }}
+                        style={{ flex: 1, border: 'none', padding: '11px 8px 11px 0', fontFamily: 'IBM Plex Mono, monospace', fontSize: '18px', fontWeight: 600, color: '#0A2044', background: 'transparent', outline: 'none' }}
                         aria-label="Withdrawal amount in USD" />
                     </div>
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', margin: '4px 0 0' }}>
@@ -275,7 +371,7 @@ export default function Dashboard() {
                       To: ••••• Bank ending 4821 (ACH)
                     </p>
                   </div>
-                  <button type="submit" disabled={wLoading} style={{ background: '#1B3A5C', color: '#fff', border: 'none', padding: '12px', fontWeight: 600, fontSize: '14px', cursor: 'pointer', transition: 'background 0.15s', opacity: wLoading ? 0.6 : 1 }}>
+                  <button type="submit" disabled={wLoading} style={{ background: '#123C7C', color: '#fff', border: 'none', padding: '12px', fontWeight: 600, fontSize: '14px', cursor: 'pointer', transition: 'background 0.15s', opacity: wLoading ? 0.6 : 1 }}>
                     {wLoading ? 'Submitting…' : 'Request withdrawal'}
                   </button>
                 </form>
@@ -286,16 +382,16 @@ export default function Dashboard() {
           {/* Transaction history */}
           <div id="history" style={{ background: '#fff', border: '1px solid #DCE3EA' }}>
             <div style={{ padding: '20px 24px', borderBottom: '1px solid #DCE3EA', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#0F2338', margin: 0 }}>Transaction history</h2>
-              <button style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#4A7DA8', background: 'none', border: '1px solid #DCE3EA', padding: '6px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 4h9M4 7h5M6 10h1" stroke="#4A7DA8" strokeWidth="1.2" strokeLinecap="square" /></svg>
+              <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#0A2044', margin: 0 }}>Transaction history</h2>
+              <button style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#4779C4', background: 'none', border: '1px solid #DCE3EA', padding: '6px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 4h9M4 7h5M6 10h1" stroke="#4779C4" strokeWidth="1.2" strokeLinecap="square" /></svg>
                 Download PDF
               </button>
             </div>
             <div style={{ overflowX: 'auto' }}>
               {txs.length === 0 ? (
                 <div style={{ padding: '48px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                  <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '16px', color: '#0F2338', margin: 0 }}>No activity yet</p>
+                  <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '16px', color: '#0A2044', margin: 0 }}>No activity yet</p>
                   <p style={{ fontSize: '13px', color: '#6B7280', margin: 0 }}>Send your first deposit to the address above and it will appear here.</p>
                 </div>
               ) : (
@@ -312,14 +408,14 @@ export default function Dashboard() {
                     <tr key={tx.id} style={{ borderBottom: i < txs.length - 1 ? '1px solid #DCE3EA' : 'none' }}>
                       <td style={{ padding: '12px 16px', color: '#374151' }}>{tx.date}</td>
                       <td style={{ padding: '12px 16px' }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 500, color: tx.type === 'Deposit' ? '#1E7A4C' : '#1B3A5C' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 500, color: tx.type === 'Deposit' ? '#1E7A4C' : '#123C7C' }}>
                           {tx.type === 'Deposit' ? '↓' : '↑'} {tx.type}
                         </span>
                       </td>
                       <td style={{ padding: '12px 16px', color: '#374151' }}>{tx.asset}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right', color: '#374151' }}>{tx.amount || '—'}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right', color: '#6B7280' }}>{tx.rate || '—'}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, color: '#0F2338' }}>{tx.usd}</td>
+                      <td style={{ padding: '12px 16px', textAlign: 'right', color: '#374151' }}>{tx.amount || 'n/a'}</td>
+                      <td style={{ padding: '12px 16px', textAlign: 'right', color: '#6B7280' }}>{tx.rate || 'n/a'}</td>
+                      <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, color: '#0A2044' }}>{tx.usd}</td>
                       <td style={{ padding: '12px 16px' }}>
                         <span style={{ fontSize: '11px', fontWeight: 600, color: tx.status === 'Pending' ? '#9A6B00' : tx.status === 'On Hold' ? '#9A6B00' : '#1E7A4C', letterSpacing: '0.04em' }}>
                           ● {tx.status}
@@ -334,7 +430,128 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+      <Toast toasts={toasts} onDismiss={dismissToast} />
+      {scanOpen && (
+        <CardScanner
+          onClose={() => setScanOpen(false)}
+          onComplete={handleCardComplete}
+        />
+      )}
     </>
+  );
+}
+
+function CardVisual({ last4 }: { last4: string }) {
+  const masked = last4 && last4 !== '••••';
+  return (
+    <figure style={{ margin: 0 }}>
+      <div
+        style={{
+          background: 'linear-gradient(135deg, #12498F 0%, #123C7C 48%, #0B2B5C 100%)',
+          borderRadius: '14px',
+          border: '1px solid #0A2044',
+          padding: '18px 20px',
+          aspectRatio: '1.586 / 1',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          position: 'relative',
+          overflow: 'hidden',
+          boxShadow: '0 10px 26px rgba(10, 32, 68, 0.28)',
+        }}
+        aria-hidden="true"
+      >
+        {/* Top row: logo lockup and contactless mark */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CardShieldLogo />
+            <span style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '13.5px', color: '#fff', letterSpacing: '0.05em', lineHeight: 1.1 }}>
+              SHIELD SAFE BANK
+            </span>
+          </div>
+          <ContactlessMark />
+        </div>
+
+        {/* Chip */}
+        <div style={{ marginTop: '4px' }}>
+          <EmvChip />
+        </div>
+
+        {/* Card number, masked */}
+        <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: 'clamp(14px, 4.4vw, 18px)', color: '#fff', margin: '0 0 12px', letterSpacing: '0.06em', fontVariantNumeric: 'tabular-nums', textShadow: '0 1px 2px rgba(10, 32, 68, 0.45)' }}>
+          •••• •••• •••• {masked ? last4 : '••••'}
+        </p>
+
+        {/* Holder, expiry, network mark */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '12px' }}>
+          <div style={{ minWidth: 0 }}>
+            <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '8.5px', letterSpacing: '0.16em', textTransform: 'uppercase', color: '#A9C6E8', margin: '0 0 3px' }}>
+              Cardholder
+            </p>
+            <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '11.5px', color: '#fff', margin: 0, letterSpacing: '0.05em', textTransform: 'uppercase', filter: 'blur(5px)', userSelect: 'none' }}>
+              Cardholder Name
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '14px' }}>
+            <div style={{ textAlign: 'right' }}>
+              <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '8.5px', letterSpacing: '0.14em', textTransform: 'uppercase', color: '#A9C6E8', margin: '0 0 3px' }}>
+                Expires
+              </p>
+              <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#fff', margin: 0, letterSpacing: '0.1em', filter: 'blur(4px)', userSelect: 'none' }}>
+                ••/••
+              </p>
+            </div>
+            <MastercardMark />
+          </div>
+        </div>
+      </div>
+
+      <figcaption style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10.5px', color: '#6B7280', margin: '10px 0 0', lineHeight: 1.5 }}>
+        Card details are hidden for your security.
+      </figcaption>
+    </figure>
+  );
+}
+
+function CardShieldLogo() {
+  return (
+    <svg width="20" height="23" viewBox="0 0 28 32" fill="none" aria-hidden="true">
+      <path d="M14 1L2 6V17C2 23.627 7.373 29.627 14 31C20.627 29.627 26 23.627 26 17V6L14 1Z" fill="#E3B23C" />
+      <rect x="11" y="12" width="6" height="7" rx="0.5" stroke="#123C7C" strokeWidth="1.6" fill="none" />
+      <path d="M11.5 12V10.5C11.5 8.567 13.067 7 15 7V7" stroke="#123C7C" strokeWidth="1.6" strokeLinecap="square" />
+      <circle cx="14" cy="15.2" r="1" fill="#123C7C" />
+      <line x1="14" y1="16.2" x2="14" y2="17.8" stroke="#123C7C" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ContactlessMark() {
+  return (
+    <svg width="18" height="20" viewBox="0 0 18 20" fill="none" aria-hidden="true">
+      <path d="M5 6.5a7 7 0 0 1 0 7" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M8.4 4.4a10.5 10.5 0 0 1 0 11.2" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M11.8 2.3a14 14 0 0 1 0 15.4" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function EmvChip() {
+  return (
+    <svg width="34" height="26" viewBox="0 0 34 26" fill="none" aria-hidden="true">
+      <rect x="0.5" y="0.5" width="33" height="25" rx="4" fill="#D8B26B" stroke="#B8934A" />
+      <path d="M11 0.5v25M23 0.5v25M0.5 9h33M0.5 17h33" stroke="#B8934A" strokeWidth="0.9" />
+      <rect x="8" y="7" width="18" height="12" rx="2" fill="#C9A259" stroke="#B8934A" strokeWidth="0.8" />
+    </svg>
+  );
+}
+
+function MastercardMark() {
+  return (
+    <svg width="36" height="23" viewBox="0 0 36 23" fill="none" aria-hidden="true">
+      <circle cx="13" cy="11.5" r="10.5" fill="#EB001B" />
+      <circle cx="23" cy="11.5" r="10.5" fill="#F79E1B" fillOpacity="0.92" />
+    </svg>
   );
 }
 
@@ -343,9 +560,9 @@ function AddressBlock({ addr, network, onCopy, copied }: { addr: string; network
     <div>
       <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', margin: '0 0 6px' }}>{network}</p>
       <div style={{ display: 'flex', border: '1px solid #DCE3EA', alignItems: 'center', gap: '0', background: '#F4F6F8' }}>
-        <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#0F2338', padding: '10px 12px', margin: 0, flex: 1, wordBreak: 'break-all', lineHeight: 1.5 }}>{addr}</p>
+        <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#0A2044', padding: '10px 12px', margin: 0, flex: 1, wordBreak: 'break-all', lineHeight: 1.5 }}>{addr}</p>
         <button onClick={onCopy} aria-label="Copy address"
-          style={{ padding: '10px 14px', background: copied ? '#1E7A4C' : '#1B3A5C', border: 'none', cursor: 'pointer', flexShrink: 0, transition: 'background 0.15s' }}>
+          style={{ padding: '10px 14px', background: copied ? '#1E7A4C' : '#123C7C', border: 'none', cursor: 'pointer', flexShrink: 0, transition: 'background 0.15s' }}>
           {copied ? (
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7l4 4 6-7" stroke="#fff" strokeWidth="1.5" strokeLinecap="square" /></svg>
           ) : (
@@ -359,7 +576,7 @@ function AddressBlock({ addr, network, onCopy, copied }: { addr: string; network
 
 function StatusPill({ label, color, border }: { label: string; color: string; border?: boolean }) {
   return (
-    <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#fff', background: border ? 'transparent' : color, border: border ? '1px solid #4A7DA8' : 'none', padding: '3px 10px', letterSpacing: '0.04em' }}>
+    <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#fff', background: border ? 'transparent' : color, border: border ? '1px solid #4779C4' : 'none', padding: '3px 10px', letterSpacing: '0.04em' }}>
       {label}
     </span>
   );

@@ -21,7 +21,7 @@ export default function Footer() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-10">
           <div>
-            <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4A7DA8', marginBottom: '12px' }}>Product</p>
+            <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', marginBottom: '12px' }}>Product</p>
             <nav className="flex flex-col gap-2">
               <FootLink to="/how-it-works">How It Works</FootLink>
               <FootLink to="/personal">Personal Banking</FootLink>
@@ -30,7 +30,7 @@ export default function Footer() {
             </nav>
           </div>
           <div>
-            <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4A7DA8', marginBottom: '12px' }}>Company</p>
+            <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', marginBottom: '12px' }}>Company</p>
             <nav className="flex flex-col gap-2">
               <FootLink to="/about">About</FootLink>
               <FootLink to="/security">Security</FootLink>
@@ -38,7 +38,7 @@ export default function Footer() {
             </nav>
           </div>
           <div>
-            <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4A7DA8', marginBottom: '12px' }}>Legal</p>
+            <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', marginBottom: '12px' }}>Legal</p>
             <nav className="flex flex-col gap-2">
               <FootLink to="/legal?section=terms">Terms of Service</FootLink>
               <FootLink to="/legal?section=privacy">Privacy Policy</FootLink>
@@ -46,7 +46,7 @@ export default function Footer() {
             </nav>
           </div>
           <div>
-            <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4A7DA8', marginBottom: '12px' }}>Account</p>
+            <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', marginBottom: '12px' }}>Account</p>
             <nav className="flex flex-col gap-2">
               <FootLink to="/login">Log In</FootLink>
               <FootLink to="/signup">Open Account</FootLink>
@@ -80,7 +80,7 @@ function FootLink({ to, children }: { to: string; children: React.ReactNode }) {
     <Link
       to={to}
       style={{ fontSize: '14px', color: '#374151', textDecoration: 'none', transition: 'color 0.15s' }}
-      onMouseEnter={e => { (e.target as HTMLElement).style.color = '#1B3A5C'; }}
+      onMouseEnter={e => { (e.target as HTMLElement).style.color = '#123C7C'; }}
       onMouseLeave={e => { (e.target as HTMLElement).style.color = '#374151'; }}
     >
       {children}

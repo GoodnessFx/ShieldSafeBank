@@ -45,7 +45,7 @@ export default function SignUp() {
 
   return (
     <>
-      <title>Open Account — Shield Safe Bank</title>
+      <title>Open Account | Shield Safe Bank</title>
       <div style={{ minHeight: 'calc(100vh - 120px)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F4F6F8', padding: '40px 16px' }}>
         <div style={{ width: '100%', maxWidth: '480px' }}>
           <div style={{ textAlign: 'center', marginBottom: '16px' }}>
@@ -53,17 +53,17 @@ export default function SignUp() {
           </div>
 
           <div className="auth-card" style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '40px' }}>
-            <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '22px', color: '#0F2338', margin: '0 0 20px' }}>Create your account</h1>
+            <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '22px', color: '#0A2044', margin: '0 0 20px' }}>Create your account</h1>
             <div style={{ display: 'flex', border: '1px solid #DCE3EA', marginBottom: '24px' }}>
               {(['personal', 'business'] as const).map(t => (
-                <button key={t} onClick={() => setType(t)} style={{ flex: 1, padding: '10px', background: type === t ? '#1B3A5C' : '#fff', color: type === t ? '#fff' : '#6B7280', border: 'none', fontSize: '14px', fontWeight: type === t ? 600 : 400, cursor: 'pointer', textTransform: 'capitalize', transition: 'background 0.12s, color 0.12s' }}>
+                <button key={t} onClick={() => setType(t)} style={{ flex: 1, padding: '10px', background: type === t ? '#123C7C' : '#fff', color: type === t ? '#fff' : '#6B7280', border: 'none', fontSize: '14px', fontWeight: type === t ? 600 : 400, cursor: 'pointer', textTransform: 'capitalize', transition: 'background 0.12s, color 0.12s' }}>
                   {t}
                 </button>
               ))}
             </div>
             <form onSubmit={handleAccount} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <button type="button" onClick={handleGoogle} disabled={loading}
-                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', border: '1px solid #DCE3EA', background: '#fff', padding: '11px', fontSize: '14px', fontWeight: 500, color: '#0F2338', cursor: 'pointer', transition: 'background 0.15s', opacity: loading ? 0.6 : 1 }}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', border: '1px solid #DCE3EA', background: '#fff', padding: '11px', fontSize: '14px', fontWeight: 500, color: '#0A2044', cursor: 'pointer', transition: 'background 0.15s', opacity: loading ? 0.6 : 1 }}
                 onMouseEnter={e => { (e.target as HTMLElement).style.background = '#F4F6F8'; }}
                 onMouseLeave={e => { (e.target as HTMLElement).style.background = '#fff'; }}>
                 {googleSvg()} Continue with Google
@@ -82,7 +82,7 @@ export default function SignUp() {
                 {loading ? 'Creating…' : 'Open account'}
               </button>
               <p style={{ fontSize: '13px', color: '#6B7280', margin: 0, textAlign: 'center' }}>
-                Already have an account? <Link to="/login" style={{ color: '#1B3A5C' }}>Log in</Link>
+                Already have an account? <Link to="/login" style={{ color: '#123C7C' }}>Log in</Link>
               </p>
             </form>
           </div>
@@ -97,9 +97,9 @@ function SField({ label, type, value, onChange, required, inputMode, maxLength }
 }) {
   return (
     <div>
-      <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4A7DA8', display: 'block', marginBottom: '6px' }}>{label}</label>
+      <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4779C4', display: 'block', marginBottom: '6px' }}>{label}</label>
       <input type={type} value={value} onChange={e => onChange(e.target.value)} required={required} inputMode={inputMode} maxLength={maxLength}
-        style={{ width: '100%', border: '1px solid #DCE3EA', padding: '11px 12px', fontSize: '14px', color: '#0F2338', background: '#fff', outline: 'none' }} />
+        style={{ width: '100%', border: '1px solid #DCE3EA', padding: '11px 12px', fontSize: '14px', color: '#0A2044', background: '#fff', outline: 'none' }} />
     </div>
   );
 }

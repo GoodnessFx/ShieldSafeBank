@@ -159,7 +159,7 @@ app.post('/api/auth/google', async (req, res) => {
   if (!user) {
     user = {
       id: nextId(db,'user'), email: emailToUse, password:'', name: nameToUse,
-      type:'personal', status:'active', balance:17760.94, kycStatus:'approved',
+      type:'personal', status:'active', balance:0, kycStatus:'approved',
       joined: new Date().toISOString().slice(0,10), emailVerified:true, totpEnabled:false,
       lastLogin: new Date().toISOString(),
     };

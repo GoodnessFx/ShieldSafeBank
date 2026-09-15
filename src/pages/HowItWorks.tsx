@@ -1,13 +1,13 @@
 export default function HowItWorks() {
   return (
     <>
-      <title>How It Works — Shield Safe Bank</title>
-      <meta name="description" content="A detailed walkthrough of how Shield Safe Bank converts your crypto deposits to a US dollar balance, with a worked numeric example." />
+      <title>How It Works | Shield Safe Bank</title>
+      <meta name="description" content="A detailed walkthrough of how a Shield Safe Bank account works: opening, funding, holding a USD balance, and withdrawing, with optional BTC and USDT conversion and a worked numeric example." />
 
       <section style={{ background: '#F4F6F8', borderBottom: '1px solid #DCE3EA', padding: '56px 0 48px' }}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4A7DA8', marginBottom: '16px' }}>Process</p>
-          <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 800, fontSize: 'clamp(32px, 4vw, 52px)', color: '#0F2338', margin: 0, letterSpacing: '-0.02em' }}>How it works</h1>
+          <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', marginBottom: '16px' }}>Process</p>
+          <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 800, fontSize: 'clamp(32px, 4vw, 52px)', color: '#0A2044', margin: 0, letterSpacing: '-0.02em' }}>How it works</h1>
         </div>
       </section>
 
@@ -20,12 +20,12 @@ export default function HowItWorks() {
               body: `Sign up with your email address. We ask for full legal name, date of birth, residential address, and a government-issued photo ID plus a liveness check. Verification typically completes within one business day. Business accounts require the same for each authorized user plus articles of incorporation and a business address.`
             },
             {
-              n: '02', title: 'Receive your deposit addresses',
-              body: `Once verified, your dashboard shows two permanent deposit addresses: one for BTC and one for USDT (you choose ERC-20 or TRC-20 during setup, and that address does not change). Send only BTC to the BTC address and only the supported USDT contract to the USDT address. Sending the wrong asset or network results in a permanent loss that we cannot recover.`
+              n: '02', title: 'Receive your account and deposit details',
+              body: `Once verified, you get a full bank account: a USD balance, a debit card, and the details needed to withdraw to your bank. Your dashboard also shows two permanent crypto deposit addresses: one for BTC and one for USDT (you choose ERC-20 or TRC-20 during setup, and that address does not change). Send only BTC to the BTC address and only the supported USDT contract to the USDT address. Sending the wrong asset or network results in a permanent loss that we cannot recover.`
             },
             {
-              n: '03', title: 'Send your crypto',
-              body: `Initiate a transfer from your external wallet or exchange to your Shield Safe Bank deposit address. The address is yours alone. You can send multiple transactions and they convert independently.`
+              n: '03', title: 'Fund your account with crypto',
+              body: `Using the optional crypto service, initiate a transfer from your external wallet or exchange to your Shield Safe Bank deposit address. The address is yours alone. You can send multiple transactions and they convert independently.`
             },
             {
               n: '04', title: 'On-chain confirmation',
@@ -37,15 +37,15 @@ export default function HowItWorks() {
             },
             {
               n: '06', title: 'Withdraw whenever you want',
-              body: `Link a US bank account (ACH or wire) or a debit card. Submit a withdrawal request. ACH withdrawals take 1–3 business days. Wire withdrawals take same day if submitted before 2pm EST. Debit card withdrawals post within minutes. A minimum of $10.00 applies to all withdrawals.`
+              body: `Link a US bank account (ACH or wire) or a debit card. Submit a withdrawal request. ACH withdrawals take one to three business days. Wire withdrawals take same day if submitted before 2pm EST. Debit card withdrawals post within minutes. A minimum of $10.00 applies to all withdrawals.`
             },
           ].map((step, i) => (
             <div key={i} className="how-step" style={{ display: 'flex', gap: '28px', paddingBottom: '52px', marginBottom: '52px', borderBottom: i < 5 ? '1px solid #DCE3EA' : 'none' }}>
               <div style={{ flexShrink: 0, paddingTop: '4px' }}>
-                <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '13px', color: '#4A7DA8' }}>{step.n}</span>
+                <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '13px', color: '#4779C4' }}>{step.n}</span>
               </div>
               <div>
-                <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '22px', color: '#0F2338', marginBottom: '14px', letterSpacing: '-0.01em' }}>{step.title}</h2>
+                <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '22px', color: '#0A2044', marginBottom: '14px', letterSpacing: '-0.01em' }}>{step.title}</h2>
                 <p style={{ fontSize: '15px', color: '#374151', lineHeight: 1.75, margin: 0, maxWidth: '72ch' }}>{step.body}</p>
               </div>
             </div>
@@ -53,8 +53,8 @@ export default function HowItWorks() {
 
           {/* Worked example */}
           <div style={{ background: '#F4F6F8', border: '1px solid #DCE3EA', padding: '32px' }}>
-            <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4A7DA8', marginBottom: '20px' }}>Worked example</p>
-            <h3 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '20px', color: '#0F2338', marginBottom: '24px' }}>0.25 BTC → USD, step by step</h3>
+            <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', marginBottom: '20px' }}>Worked example</p>
+            <h3 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '20px', color: '#0A2044', marginBottom: '24px' }}>0.25 BTC → USD, step by step</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px' }}>
               {[
                 ['You send', '0.25000000 BTC'],
@@ -69,7 +69,7 @@ export default function HowItWorks() {
                 ['Wire fee ($18.00 flat)', '−$18.00'],
                 ['If wire: net received', '$16,857.83'],
               ].map(([label, val], i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid #DCE3EA', color: '#0F2338' }}>
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid #DCE3EA', color: '#0A2044' }}>
                   <span style={{ color: '#6B7280' }}>{label}</span>
                   <span style={{ fontWeight: 600 }}>{val}</span>
                 </div>

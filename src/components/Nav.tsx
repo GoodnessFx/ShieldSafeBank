@@ -33,13 +33,13 @@ export default function Nav() {
               style={{
                 fontSize: '14px',
                 fontWeight: 500,
-                color: loc.pathname === l.to ? '#1B3A5C' : '#4A5568',
+                color: loc.pathname === l.to ? '#123C7C' : '#4A5568',
                 textDecoration: 'none',
                 transition: 'color 0.15s',
-                borderBottom: loc.pathname === l.to ? '2px solid #1B3A5C' : '2px solid transparent',
+                borderBottom: loc.pathname === l.to ? '2px solid #123C7C' : '2px solid transparent',
                 paddingBottom: '2px',
               }}
-              onMouseEnter={e => { if (loc.pathname !== l.to) (e.target as HTMLElement).style.color = '#1B3A5C'; }}
+              onMouseEnter={e => { if (loc.pathname !== l.to) (e.target as HTMLElement).style.color = '#123C7C'; }}
               onMouseLeave={e => { if (loc.pathname !== l.to) (e.target as HTMLElement).style.color = '#4A5568'; }}
             >
               {l.label}
@@ -53,7 +53,7 @@ export default function Nav() {
             <Link to="/dashboard" className="btn-primary" style={{ fontSize: '13px', padding: '6px 16px' }}>Dashboard</Link>
           ) : (
             <>
-              <Link to="/login" style={{ fontSize: '13px', fontWeight: 500, color: '#1B3A5C', textDecoration: 'none' }}>Log in</Link>
+              <Link to="/login" style={{ fontSize: '13px', fontWeight: 500, color: '#123C7C', textDecoration: 'none' }}>Log in</Link>
               <Link to="/signup" className="btn-primary" style={{ fontSize: '13px', padding: '6px 16px' }}>Open Account</Link>
             </>
           )}
@@ -65,9 +65,9 @@ export default function Nav() {
           aria-label={open ? 'Close menu' : 'Open menu'}
           onClick={() => setOpen(!open)}
         >
-          <span style={{ width: 20, height: 1.5, background: '#1B3A5C', display: 'block', transition: 'transform 0.2s', transform: open ? 'rotate(45deg) translate(2px, 4px)' : '' }} />
-          <span style={{ width: 20, height: 1.5, background: '#1B3A5C', display: 'block', opacity: open ? 0 : 1, transition: 'opacity 0.15s' }} />
-          <span style={{ width: 20, height: 1.5, background: '#1B3A5C', display: 'block', transition: 'transform 0.2s', transform: open ? 'rotate(-45deg) translate(2px, -4px)' : '' }} />
+          <span style={{ width: 20, height: 1.5, background: '#123C7C', display: 'block', transition: 'transform 0.2s', transform: open ? 'rotate(45deg) translate(2px, 4px)' : '' }} />
+          <span style={{ width: 20, height: 1.5, background: '#123C7C', display: 'block', opacity: open ? 0 : 1, transition: 'opacity 0.15s' }} />
+          <span style={{ width: 20, height: 1.5, background: '#123C7C', display: 'block', transition: 'transform 0.2s', transform: open ? 'rotate(-45deg) translate(2px, -4px)' : '' }} />
         </button>
       </div>
 
@@ -76,10 +76,10 @@ export default function Nav() {
         <div style={{ borderTop: '1px solid #DCE3EA', background: '#fff', padding: '16px 24px 24px' }}>
           <nav className="flex flex-col gap-4" aria-label="Mobile navigation">
             {links.map(l => (
-              <Link key={l.to} to={l.to} style={{ fontSize: '15px', fontWeight: 500, color: '#1B3A5C', textDecoration: 'none' }} onClick={() => setOpen(false)}>{l.label}</Link>
+              <Link key={l.to} to={l.to} style={{ fontSize: '15px', fontWeight: 500, color: '#123C7C', textDecoration: 'none' }} onClick={() => setOpen(false)}>{l.label}</Link>
             ))}
             <div style={{ borderTop: '1px solid #DCE3EA', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <Link to="/login" style={{ fontSize: '15px', fontWeight: 500, color: '#1B3A5C', textDecoration: 'none' }} onClick={() => setOpen(false)}>Log in</Link>
+              <Link to="/login" style={{ fontSize: '15px', fontWeight: 500, color: '#123C7C', textDecoration: 'none' }} onClick={() => setOpen(false)}>Log in</Link>
               <Link to="/signup" className="btn-primary" style={{ display: 'inline-block', textAlign: 'center', padding: '10px 20px' }} onClick={() => setOpen(false)}>Open Account</Link>
             </div>
           </nav>

@@ -23,22 +23,22 @@ export default function AdminLogin() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0F2338', padding: '40px 16px' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0A2044', padding: '40px 16px' }}>
       <div style={{ width: '100%', maxWidth: '360px' }}>
         <div style={{ marginBottom: '28px', textAlign: 'center' }}>
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px' }}>
             <BrandMark height={30} white />
           </div>
-          <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#374151', margin: 0, letterSpacing: '0.06em' }}>ADMIN CONSOLE — RESTRICTED</p>
+          <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#374151', margin: 0, letterSpacing: '0.06em' }}>ADMIN CONSOLE | RESTRICTED</p>
         </div>
 
-        <div className="auth-card" style={{ background: '#12283F', border: '1px solid #1B3A5C', padding: '36px' }}>
+        <div className="auth-card" style={{ background: '#0B2B5C', border: '1px solid #123C7C', padding: '36px' }}>
           <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <AField label="Admin email" type="email" value={email} onChange={setEmail} autoComplete="username" />
             <AField label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password" />
             {error && <p style={{ fontSize: '13px', color: '#F87171', margin: 0 }}>{error}</p>}
             <button type="submit" disabled={loading}
-              style={{ background: '#4A7DA8', color: '#fff', border: 'none', padding: '12px', fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '13px', cursor: 'pointer', letterSpacing: '0.04em', opacity: loading ? 0.6 : 1 }}>
+              style={{ background: '#4779C4', color: '#fff', border: 'none', padding: '12px', fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '13px', cursor: 'pointer', letterSpacing: '0.04em', opacity: loading ? 0.6 : 1 }}>
               {loading ? 'SIGNING IN…' : 'LOG IN'}
             </button>
           </form>
@@ -53,9 +53,9 @@ function AField({ label, type, value, onChange, autoComplete }: {
 }) {
   return (
     <div>
-      <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase', color: '#4A7DA8', display: 'block', marginBottom: '6px' }}>{label}</label>
+      <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase', color: '#4779C4', display: 'block', marginBottom: '6px' }}>{label}</label>
       <input type={type} value={value} onChange={e => onChange(e.target.value)} autoComplete={autoComplete}
-        style={{ width: '100%', border: '1px solid #1B3A5C', padding: '10px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '14px', color: '#fff', background: '#0F2338', outline: 'none', boxSizing: 'border-box' }} />
+        style={{ width: '100%', border: '1px solid #123C7C', padding: '10px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '14px', color: '#fff', background: '#0A2044', outline: 'none', boxSizing: 'border-box' }} />
     </div>
   );
 }

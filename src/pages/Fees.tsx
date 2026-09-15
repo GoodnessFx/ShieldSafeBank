@@ -1,13 +1,13 @@
 export default function Fees() {
   return (
     <>
-      <title>Fees — Shield Safe Bank</title>
+      <title>Fees | Shield Safe Bank</title>
       <meta name="description" content="Complete fee table for Shield Safe Bank. No hidden markups. Flat, itemized rates for conversion, withdrawals, and account services." />
 
       <section style={{ background: '#F4F6F8', borderBottom: '1px solid #DCE3EA', padding: '56px 0 48px' }}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4A7DA8', marginBottom: '16px' }}>Pricing</p>
-          <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 800, fontSize: 'clamp(32px, 4vw, 52px)', color: '#0F2338', margin: '0 0 16px', letterSpacing: '-0.02em' }}>Fees</h1>
+          <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', marginBottom: '16px' }}>Pricing</p>
+          <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 800, fontSize: 'clamp(32px, 4vw, 52px)', color: '#0A2044', margin: '0 0 16px', letterSpacing: '-0.02em' }}>Fees</h1>
           <p style={{ fontSize: '16px', color: '#4A5568', lineHeight: 1.65, maxWidth: '480px', margin: 0 }}>
             Every fee is listed here. There are no hidden markups embedded in the exchange rate.
           </p>
@@ -21,11 +21,11 @@ export default function Fees() {
             ['BTC to USD', '0.50% of gross USD value'],
             ['USDT to USD (ERC-20)', '0.30% of gross USD value'],
             ['USDT to USD (TRC-20)', '0.30% of gross USD value'],
-            ['Exchange rate markup', '$0.00 — rate is mid-market at confirmation'],
+            ['Exchange rate markup', '$0.00 (rate is mid-market at confirmation)'],
           ]} />
 
           <FeeTable title="Withdrawals" rows={[
-            ['ACH (1–3 business days)', '$0.00'],
+            ['ACH (one to three business days)', '$0.00'],
             ['Wire (same day if before 2pm EST)', '$18.00 flat'],
             ['Debit card (minutes)', '1.50% of withdrawal amount, min $2.00'],
             ['Minimum withdrawal', '$10.00'],
@@ -47,7 +47,7 @@ export default function Fees() {
           ]} />
 
           <div style={{ background: '#F4F6F8', border: '1px solid #DCE3EA', padding: '24px' }}>
-            <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '15px', color: '#0F2338', margin: '0 0 8px' }}>Network fees (gas)</p>
+            <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '15px', color: '#0A2044', margin: '0 0 8px' }}>Network fees (gas)</p>
             <p style={{ fontSize: '14px', color: '#4A5568', lineHeight: 1.65, margin: 0 }}>
               Network transaction fees (gas) on the sending side are paid by you when you initiate the transfer from your wallet. We do not add a surcharge. We do not charge any fee for receiving a deposit on our end.
             </p>
@@ -65,12 +65,12 @@ export default function Fees() {
 function FeeTable({ title, rows }: { title: string; rows: [string, string][] }) {
   return (
     <div>
-      <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '20px', color: '#0F2338', marginBottom: '16px', letterSpacing: '-0.01em' }}>{title}</h2>
+      <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '20px', color: '#0A2044', marginBottom: '16px', letterSpacing: '-0.01em' }}>{title}</h2>
       <div style={{ border: '1px solid #DCE3EA' }}>
         {rows.map(([label, val], i) => (
           <div key={i} className="fee-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderBottom: i < rows.length - 1 ? '1px solid #DCE3EA' : 'none', background: i % 2 === 0 ? '#fff' : '#F4F6F8' }}>
             <span style={{ fontSize: '14px', color: '#374151' }}>{label}</span>
-            <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '14px', fontWeight: 600, color: '#0F2338', textAlign: 'right' }}>{val}</span>
+            <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '14px', fontWeight: 600, color: '#0A2044', textAlign: 'right' }}>{val}</span>
           </div>
         ))}
       </div>
