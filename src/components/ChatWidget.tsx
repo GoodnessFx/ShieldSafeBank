@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { chatIdentity, pushChatMessage, getThreadMessages, markThreadRead, ChatMessage } from '../lib/localStore';
+import { Link } from 'react-router';
+import { chatIdentity, pushChatMessage, getThreadMessages, markThreadRead, type ChatMessage } from '../lib/localStore';
 
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
@@ -7,9 +8,8 @@ export default function ChatWidget() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sent, setSent] = useState(false);
 
-  function identity() {
-    return chatIdentity();
-  }
+  const identity = chatIdentity();
+  const signedIn = !!identity.email;
 
   function load() {
     const id = chatIdentity().id;
@@ -29,7 +29,8 @@ export default function ChatWidget() {
 
   function send() {
     if (!input.trim()) return;
-    const who = identity();
+    const who = chatIdentity();
+    if (!who.email) return; // chats require a signed-in user
     pushChatMessage(who.id, who.user, who.email, input, 'user');
     load();
     markThreadRead(who.id);
@@ -50,6 +51,13 @@ export default function ChatWidget() {
             <button onClick={closeChat} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: '4px', fontSize: '18px', lineHeight: 1 }} aria-label="Close chat">&#x2715;</button>
           </div>
 
+          {!signedIn ? (
+            <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px', textAlign: 'center' }}>
+              <p style={{ margin: 0, fontSize: '13px', color: '#0A2044', lineHeight: 1.5 }}>Please sign in to chat with our support team.</p>
+              <Link to="/login" onClick={closeChat} style={{ background: '#123C7C', color: '#fff', border: 'none', padding: '10px 22px', fontWeight: 600, fontSize: '13px', textDecoration: 'none', cursor: 'pointer' }}>Sign in</Link>
+            </div>
+          ) : (
+            <>
           {/* Messages */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '260px' }}>
             {messages.length === 0 ? (
@@ -88,6 +96,8 @@ export default function ChatWidget() {
               />
               <button onClick={send} style={{ background: '#123C7C', color: '#fff', border: 'none', padding: '8px 14px', cursor: 'pointer', fontWeight: 500, fontSize: '13px' }}>Send</button>
             </div>
+          )}
+            </>
           )}
         </div>
       )}

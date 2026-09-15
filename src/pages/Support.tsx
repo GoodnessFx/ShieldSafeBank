@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
+import { chatIdentity, pushChatMessage } from '../lib/localStore';
 import { submitSupportMessage } from '../lib/api';
 
 const FAQ: Record<string, { q: string; a: string }[]> = {
@@ -34,9 +36,16 @@ const FAQ: Record<string, { q: string; a: string }[]> = {
 };
 
 export default function Support() {
+  const identity = chatIdentity();
+  const signedIn = !!identity.email;
   const [active, setActive] = useState('Getting Started');
   const [openQ, setOpenQ] = useState<number | null>(null);
-  const [formState, setFormState] = useState({ name: '', email: '', category: 'General', message: '' });
+  const [formState, setFormState] = useState({
+    name: identity.email && identity.user !== identity.email ? identity.user : '',
+    email: identity.email || '',
+    category: 'General',
+    message: '',
+  });
   const [sent, setSent] = useState(false);
 
   return (
@@ -102,11 +111,18 @@ export default function Support() {
               <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '16px', color: '#1E7A4C', margin: '0 0 8px' }}>Message received</p>
               <p style={{ fontSize: '14px', color: '#4A5568', margin: 0 }}>We will follow up at {formState.email} within one business day.</p>
             </div>
+          ) : !signedIn ? (
+            <div style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '32px', textAlign: 'center' }}>
+              <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '16px', color: '#0A2044', margin: '0 0 8px' }}>Sign in to send us a message</p>
+              <p style={{ fontSize: '13px', color: '#4A5568', margin: '0 0 24px', lineHeight: 1.6 }}>We reply to messages through the account you're signed in with, so we always know who we're talking to.</p>
+              <Link to="/login" style={{ display: 'inline-block', background: '#123C7C', color: '#fff', padding: '12px 28px', fontWeight: 600, fontSize: '14px', textDecoration: 'none' }}>Sign in</Link>
+            </div>
           ) : (
-            <form onSubmit={e => { e.preventDefault(); submitSupportMessage(formState); setSent(true); }} style={{ display: 'flex', flexDirection: 'column', gap: '16px', background: '#fff', border: '1px solid #DCE3EA', padding: '32px' }}>
+            <form onSubmit={e => { e.preventDefault(); if (!signedIn) return; const who = chatIdentity(); pushChatMessage(who.id, who.user, who.email, formState.message, 'user'); submitSupportMessage({ name: who.user || formState.name, email: who.email, category: formState.category, message: formState.message }); setSent(true); }} style={{ display: 'flex', flexDirection: 'column', gap: '16px', background: '#fff', border: '1px solid #DCE3EA', padding: '32px' }}>
+              <p style={{ fontSize: '12px', color: '#6B7280', fontFamily: 'IBM Plex Mono, monospace', margin: '0 0 4px' }}>Contacting as {formState.email}</p>
               <div className="grid sm:grid-cols-2 gap-4">
                 <Field label="Full name" value={formState.name} onChange={v => setFormState(f => ({ ...f, name: v }))} type="text" required />
-                <Field label="Email address" value={formState.email} onChange={v => setFormState(f => ({ ...f, email: v }))} type="email" required />
+                <Field label="Email address" value={formState.email} onChange={v => setFormState(f => ({ ...f, email: v }))} type="email" readOnly />
               </div>
               <div>
                 <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4779C4', display: 'block', marginBottom: '6px' }}>Category</label>
@@ -130,11 +146,11 @@ export default function Support() {
   );
 }
 
-function Field({ label, value, onChange, type, required }: { label: string; value: string; onChange: (v: string) => void; type: string; required?: boolean }) {
+function Field({ label, value, onChange, type, required, readOnly }: { label: string; value: string; onChange: (v: string) => void; type: string; required?: boolean; readOnly?: boolean }) {
   return (
     <div>
       <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4779C4', display: 'block', marginBottom: '6px' }}>{label}</label>
-      <input type={type} value={value} onChange={e => onChange(e.target.value)} required={required} style={{ width: '100%', border: '1px solid #DCE3EA', padding: '10px 12px', fontSize: '14px', background: '#fff', color: '#0A2044', outline: 'none' }} />
+      <input type={type} value={value} onChange={e => onChange(e.target.value)} required={required} readOnly={readOnly} style={{ width: '100%', border: '1px solid #DCE3EA', padding: '10px 12px', fontSize: '14px', background: readOnly ? '#F4F6F8' : '#fff', color: readOnly ? '#0A2044' : '#0A2044', outline: 'none' }} />
     </div>
   );
 }
