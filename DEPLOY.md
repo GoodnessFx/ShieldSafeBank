@@ -83,8 +83,14 @@ DATABASE_URL="postgresql://..." node migrate-store.js --from-live https://shield
 ```
 
 `--from-live` merges users/threads/messages from the API with passwords from
-`store.json` (or the demo accounts). After it finishes, restart the API so it
-loads from Postgres.
+`store.json` (or the demo accounts). Preview what it would write, with no
+connection string and no writes, using `--dry-run`:
+
+```
+node migrate-store.js --from-live https://shieldsafebank-api.onrender.com --dry-run
+```
+
+After it finishes, restart the API so it loads from Postgres.
 
 ## 2. Point the frontend at the backend
 

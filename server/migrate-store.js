@@ -5,10 +5,14 @@
  *   DATABASE_URL="postgresql://..." node migrate-store.js
  *   DATABASE_URL="postgresql://..." node migrate-store.js ./data/store.json
  *   DATABASE_URL="postgresql://..." node migrate-store.js --from-live https://shieldsafebank-api.onrender.com
+ *   node migrate-store.js --from-live https://shieldsafebank-api.onrender.com --dry-run
  *
  * --from-live pulls users, threads, messages, KYC and transactions from the
  * running API (so chats that only exist in the live process are not lost) and
  * merges passwords from store.json / the demo seed.
+ *
+ * --dry-run prints exactly what would be written and exits without needing
+ * DATABASE_URL — it never connects to Postgres.
  */
 import pg from 'pg';
 import { readFileSync, existsSync } from 'node:fs';
@@ -37,12 +41,19 @@ function loadEnvFile() {
 }
 
 const envFile = loadEnvFile();
+
+const args = process.argv.slice(2);
+const FLAGS = new Set(['--from-live', '--dry-run']);
+const DRY_RUN = args.includes('--dry-run');
+const fromLiveIdx = args.indexOf('--from-live');
 const DATABASE_URL = (process.env.DATABASE_URL || '').trim();
-if (!DATABASE_URL) {
+
+if (!DATABASE_URL && !DRY_RUN) {
   console.error('DATABASE_URL is required. Set it to your Supabase Postgres URI:');
   console.error(`  • in the environment, or`);
   console.error(`  • in ${envFile || join(__dirname, '.env')} as DATABASE_URL=postgresql://...`);
   console.error('That .env file is git-ignored, so the URI is never committed.');
+  console.error('Use --dry-run to preview what would be migrated without a database.');
   process.exit(1);
 }
 
@@ -56,12 +67,10 @@ CREATE TABLE IF NOT EXISTS support_messages (id TEXT PRIMARY KEY, data JSONB NOT
 CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
 `;
 
-const args = process.argv.slice(2);
-const fromLiveIdx = args.indexOf('--from-live');
 const liveBase = fromLiveIdx >= 0
   ? String(args[fromLiveIdx + 1] || 'https://shieldsafebank-api.onrender.com').replace(/\/$/, '')
   : '';
-const fileArg = args.find((a, i) => a !== '--from-live' && (fromLiveIdx < 0 || i !== fromLiveIdx + 1));
+const fileArg = args.find((a, i) => !FLAGS.has(a) && (fromLiveIdx < 0 || i !== fromLiveIdx + 1));
 const filePath = fileArg
   || process.env.STORE_PATH
   || join(process.env.DATA_DIR || join(__dirname, 'data'), 'store.json');
@@ -266,6 +275,26 @@ if (store.users.length === 0 && Object.keys(store.messages).length === 0) {
   process.exit(1);
 }
 
-await persist(store);
 const messageCount = Object.values(store.messages).reduce((n, list) => n + (Array.isArray(list) ? list.length : 0), 0);
+
+if (DRY_RUN) {
+  // Previews exactly what the real run would write, without needing the
+  // connection string and without touching the database.
+  const withPassword = store.users.filter(u => u.password).length;
+  console.log('\nDRY RUN — nothing was written.');
+  console.log(`  Source:   ${liveBase ? `live API ${liveBase} merged with ${filePath}` : filePath}`);
+  console.log(`  Users:    ${store.users.length} (${withPassword} with a password)`);
+  console.log(`  Threads:  ${store.threads.length}  Messages: ${messageCount}`);
+  console.log(`  Txs:      ${store.transactions.length}  KYC: ${store.kycQueue.length}`);
+  console.log(`  Counters: ${JSON.stringify(store.counters)}`);
+  for (const u of store.users) console.log(`    user ${u.id}  ${u.email}  "${u.name}"${u.password ? '' : '  (no password)'}`);
+  for (const t of store.threads) {
+    const msgs = store.messages[t.id] || [];
+    console.log(`    thread ${t.id}  ${t.email || '(no email)'}  ${msgs.length} message(s)`);
+  }
+  console.log('\nRe-run without --dry-run, with DATABASE_URL set, to apply this.');
+  process.exit(0);
+}
+
+await persist(store);
 console.log(`Migrated ${store.users.length} users, ${store.threads.length} threads, ${messageCount} messages, ${store.transactions.length} transactions, ${store.kycQueue.length} KYC items.`);
