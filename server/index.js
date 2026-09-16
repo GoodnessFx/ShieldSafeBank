@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import pg from 'pg';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,24 @@ const __dirname = dirname(__filename);
 const DATA_DIR = process.env.DATA_DIR || join(__dirname, 'data');
 const DATA_PATH = join(DATA_DIR, 'store.json');
 const PORT = process.env.PORT || 4000;
+const DATABASE_URL = process.env.DATABASE_URL || '';
+const pool = DATABASE_URL
+  ? new pg.Pool({
+      connectionString: DATABASE_URL,
+      ssl: /localhost|127\.0\.0\.1/.test(DATABASE_URL) ? false : { rejectUnauthorized: false },
+      max: 5,
+    })
+  : null;
+
+const SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS kyc_queue (id TEXT PRIMARY KEY, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS messages (thread_id TEXT PRIMARY KEY, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS support_messages (id TEXT PRIMARY KEY, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
+`;
 
 const BTC_ADDR = 'bc1q4ulqydnrstew9hr2dkjaey5he2j2zyj83475mc';
 const USDT_ADDR = '0x18595c69b0e49dA32037E19246Fe88FA321De1C6';
@@ -58,17 +77,114 @@ const SEED = {
   counters: { user:7, tx:1092, thread:3, kyc:3, support:1 },
 };
 
-function loadDB() {
+function readJsonStore() {
   mkdirSync(DATA_DIR, { recursive: true });
-  if (!existsSync(DATA_PATH)) {
+  if (!existsSync(DATA_PATH)) return null;
+  return normalizeDB(JSON.parse(readFileSync(DATA_PATH, 'utf-8')));
+}
+
+function writeJsonStore(store) {
+  mkdirSync(DATA_DIR, { recursive: true });
+  writeFileSync(DATA_PATH, JSON.stringify(store, null, 2));
+}
+
+async function ensureSchema(client) {
+  await client.query(SCHEMA_SQL);
+}
+
+async function persistToPg(store) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await ensureSchema(client);
+    await client.query('DELETE FROM users');
+    await client.query('DELETE FROM transactions');
+    await client.query('DELETE FROM kyc_queue');
+    await client.query('DELETE FROM threads');
+    await client.query('DELETE FROM messages');
+    await client.query('DELETE FROM support_messages');
+    await client.query('DELETE FROM counters');
+    for (const u of store.users) {
+      await client.query('INSERT INTO users (id, data) VALUES ($1, $2::jsonb)', [u.id, JSON.stringify(u)]);
+    }
+    for (const t of store.transactions) {
+      await client.query('INSERT INTO transactions (id, data) VALUES ($1, $2::jsonb)', [t.id, JSON.stringify(t)]);
+    }
+    for (const k of store.kycQueue) {
+      await client.query('INSERT INTO kyc_queue (id, data) VALUES ($1, $2::jsonb)', [k.id, JSON.stringify(k)]);
+    }
+    for (const t of store.threads) {
+      await client.query('INSERT INTO threads (id, data) VALUES ($1, $2::jsonb)', [t.id, JSON.stringify(t)]);
+    }
+    for (const [threadId, msgs] of Object.entries(store.messages || {})) {
+      await client.query('INSERT INTO messages (thread_id, data) VALUES ($1, $2::jsonb)', [threadId, JSON.stringify(msgs)]);
+    }
+    for (const s of store.supportMessages) {
+      await client.query('INSERT INTO support_messages (id, data) VALUES ($1, $2::jsonb)', [s.id, JSON.stringify(s)]);
+    }
+    for (const [name, value] of Object.entries(store.counters || {})) {
+      await client.query('INSERT INTO counters (name, value) VALUES ($1, $2)', [name, Number(value) || 0]);
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* already failed */ }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function loadFromPg() {
+  const client = await pool.connect();
+  try {
+    await ensureSchema(client);
+    const [users, transactions, kycQueue, threads, messages, supportMessages, counters] = await Promise.all([
+      client.query('SELECT data FROM users'),
+      client.query('SELECT data FROM transactions'),
+      client.query('SELECT data FROM kyc_queue'),
+      client.query('SELECT data FROM threads'),
+      client.query('SELECT thread_id, data FROM messages'),
+      client.query('SELECT data FROM support_messages'),
+      client.query('SELECT name, value FROM counters'),
+    ]);
+    const msgMap = {};
+    for (const row of messages.rows) msgMap[row.thread_id] = row.data;
+    const counterMap = {};
+    for (const row of counters.rows) counterMap[row.name] = row.value;
+    return normalizeDB({
+      users: users.rows.map(r => r.data),
+      transactions: transactions.rows.map(r => r.data),
+      kycQueue: kycQueue.rows.map(r => r.data),
+      threads: threads.rows.map(r => r.data),
+      messages: msgMap,
+      supportMessages: supportMessages.rows.map(r => r.data),
+      counters: counterMap,
+    });
+  } finally {
+    client.release();
+  }
+}
+
+async function loadDB() {
+  if (pool) {
+    const existing = await loadFromPg();
+    if (existing.users.length > 0) return existing;
+    const fromFile = readJsonStore();
+    const store = fromFile || normalizeDB(SEED);
+    await persistToPg(store);
+    console.log(fromFile
+      ? `  Imported ${store.users.length} users from store.json into Postgres.`
+      : '  Seeded Postgres from the built-in demo store.');
+    return store;
+  }
+  const fromFile = readJsonStore();
+  if (!fromFile) {
     const seed = normalizeDB(SEED);
-    writeFileSync(DATA_PATH, JSON.stringify(seed, null, 2));
+    writeJsonStore(seed);
     return seed;
   }
-  const store = normalizeDB(JSON.parse(readFileSync(DATA_PATH, 'utf-8')));
-  // Persist the normalised store so generated account numbers stay stable.
-  writeFileSync(DATA_PATH, JSON.stringify(store, null, 2));
-  return store;
+  writeJsonStore(fromFile);
+  return fromFile;
 }
 
 function num(v) {
@@ -98,6 +214,13 @@ function normalizeDB(db) {
     u.emailVerified = !!u.emailVerified;
     u.totpEnabled = !!u.totpEnabled;
     u.accountNumber = makeAccountNumber(u.accountNumber);
+    u.firstName = u.firstName || '';
+    u.middleName = u.middleName || '';
+    u.lastName = u.lastName || '';
+    u.phone = u.phone || '';
+    u.dob = u.dob || '';
+    u.address = u.address || '';
+    u.businessName = u.businessName || '';
   });
   store.transactions = Array.isArray(store.transactions) ? store.transactions : [];
   store.transactions.forEach(t => {
@@ -121,15 +244,28 @@ function normalizeDB(db) {
   });
   store.messages = store.messages && typeof store.messages === 'object' ? store.messages : {};
   Object.keys(store.messages).forEach(id => {
-    store.messages[id] = Array.isArray(store.messages[id]) ? store.messages[id].map(m => ({ ...m, time: m.time || '', at: m.at || '' })) : [];
+    store.messages[id] = Array.isArray(store.messages[id]) ? store.messages[id].map(m => ({
+      ...m,
+      id: m.id || `legacy${id}${Math.random().toString(36).slice(2, 8)}`,
+      time: m.time || '',
+      at: m.at || '',
+    })) : [];
   });
   store.supportMessages = Array.isArray(store.supportMessages) ? store.supportMessages : [];
   store.counters = store.counters && typeof store.counters === 'object' ? store.counters : {};
   return store;
 }
 
-function saveDB(db) {
-  writeFileSync(DATA_PATH, JSON.stringify(db, null, 2));
+let persistChain = Promise.resolve();
+function saveDB(store) {
+  if (!pool) {
+    try { writeJsonStore(store); } catch (err) { console.error('[store] persist failed', err); }
+    return Promise.resolve();
+  }
+  persistChain = persistChain
+    .then(() => persistToPg(store))
+    .catch(err => { console.error('[store] persist failed', err); });
+  return persistChain;
 }
 
 /**
@@ -181,6 +317,81 @@ function nextId(db, type) {
   return `${prefixes[type] || type.toUpperCase()}${String(db.counters[type]).padStart(4,'0')}`;
 }
 
+/* ---------------------------------------------------------------------------
+ * Realtime chat transport.
+ *
+ * Provider-agnostic: every chat mutation funnels through `publishChatEvent`,
+ * which fans out to all attached Server-Sent-Events subscribers. Swapping to a
+ * managed provider (Pusher/Ably/Firebase) later means replacing only this block
+ * and the matching client module in src/lib/chatTransport.ts — the UI, the REST
+ * endpoints and the data store stay exactly as they are.
+ *
+ * Auth uses the signed token in the query string because EventSource cannot set
+ * headers. Tokens are the same stateless HMAC values the REST API uses.
+ * ------------------------------------------------------------------------- */
+const chatSubscribers = new Set();
+let chatEventId = 0;
+
+function makeMessage(db, threadId, from, text) {
+  const at = new Date().toISOString();
+  return { id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, from, text, time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }), at };
+}
+
+function publishChatEvent(threadId, messages, thread) {
+  chatEventId += 1;
+  const payload = JSON.stringify({ eventId: chatEventId, threadId, messages, thread });
+  for (const sub of chatSubscribers) {
+    // Customers only ever receive events for their own thread.
+    if (sub.userId && sub.threadId && sub.threadId !== threadId) continue;
+    if (sub.userId && !sub.threadId) {
+      // Late-created customer stream: adopt its thread on the first event.
+      const mine = (db.threads || []).find(t => t.userId === sub.userId);
+      if (!mine || mine.id !== threadId) continue;
+      sub.threadId = threadId;
+    }
+    try {
+      sub.res.write(`id: ${chatEventId}\nevent: chat\ndata: ${payload}\n\n`);
+    } catch {
+      chatSubscribers.delete(sub);
+    }
+  }
+}
+
+function openChatStream(req, res, identity) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write('retry: 3000\n\n');
+  const sub = { res, userId: identity.userId || '', isAdmin: !!identity.isAdmin, threadId: identity.threadId || '' };
+  chatSubscribers.add(sub);
+  const heartbeat = setInterval(() => {
+    try { res.write(': ping\n\n'); } catch { /* cleaned up below */ }
+  }, 25000);
+  req.on('close', () => { clearInterval(heartbeat); chatSubscribers.delete(sub); });
+}
+
+/** A customer's own thread, adopted once known so their stream filters to it. */
+function threadForUser(user) {
+  return (db.threads || []).find(t => t.userId === user.id);
+}
+
+const CHAT_MAX_LEN = 2000;
+const chatSendLog = new Map();
+
+/** Basic flood guard: 25 messages per 30 seconds per account. */
+function chatRateLimited(userId) {
+  const now = Date.now();
+  const windowStart = now - 30000;
+  const stamps = (chatSendLog.get(userId) || []).filter(t => t > windowStart);
+  if (stamps.length >= 25) { chatSendLog.set(userId, stamps); return true; }
+  stamps.push(now);
+  chatSendLog.set(userId, stamps);
+  return false;
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -198,7 +409,7 @@ app.get('/api/admin/ping', adminMiddleware, (_, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
-let db = loadDB();
+let db = normalizeDB({});
 
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
@@ -221,17 +432,20 @@ function adminMiddleware(req, res, next) {
   next();
 }
 
-app.get('/api/health', (_, res) => res.json({ ok:true, ts: Date.now() }));
 app.get('/api/rates', (_, res) => res.json({ BTC: 67842.50, USDT: 0.9998 }));
 
 app.post('/api/auth/register', (req, res) => {
-  const { email, password, name, type, businessName } = req.body;
+  const { email, password, name, type, businessName, firstName, middleName, lastName, phone, dob, address } = req.body;
   if (!email || !password || !name) return res.status(400).json({ error:'Email, password, and name are required.' });
   if (db.users.find(u => u.email === email)) return res.status(409).json({ error:'An account with this email already exists.' });
   const user = {
     id: nextId(db,'user'), email, password, name, type: type || 'personal',
     status:'active', balance:0, kycStatus:'pending', joined: new Date().toISOString().slice(0,10),
-    emailVerified:false, totpEnabled:false, businessName: businessName || '',
+    emailVerified:false, totpEnabled:false,
+    firstName: (firstName || '').trim(), middleName: (middleName || '').trim(),
+    lastName: (lastName || '').trim(), phone: (phone || '').trim(),
+    dob: (dob || '').trim(), address: (address || '').trim(),
+    businessName: businessName || '',
     accountNumber: makeAccountNumber(),
     lastLogin: new Date().toISOString(),
   };
@@ -307,7 +521,17 @@ app.post('/api/auth/verify-email', authMiddleware, (req, res) => {
 
 app.get('/api/auth/me', authMiddleware, (req, res) => {
   const u = req.user;
-  res.json({ id:u.id, email:u.email, name:u.name, balance:num(u.balance), kycStatus:u.kycStatus, type:u.type, status:u.status, joined:u.joined, emailVerified:u.emailVerified, accountNumber:u.accountNumber });
+  res.json({ id:u.id, email:u.email, name:u.name, balance:num(u.balance), kycStatus:u.kycStatus, type:u.type, status:u.status, joined:u.joined, emailVerified:u.emailVerified, accountNumber:u.accountNumber, firstName:u.firstName || '', middleName:u.middleName || '', lastName:u.lastName || '', phone:u.phone || '', dob:u.dob || '', address:u.address || '', businessName:u.businessName || '' });
+});
+
+app.post('/api/auth/profile', authMiddleware, (req, res) => {
+  const allowed = ['name', 'firstName', 'middleName', 'lastName', 'phone', 'dob', 'address', 'businessName'];
+  for (const key of allowed) {
+    if (typeof req.body[key] === 'string') req.user[key] = req.body[key].trim();
+  }
+  saveDB(db);
+  const u = req.user;
+  res.json({ ok:true, user:{ id:u.id, email:u.email, name:u.name, balance:num(u.balance), kycStatus:u.kycStatus, type:u.type, status:u.status, joined:u.joined, emailVerified:u.emailVerified, accountNumber:u.accountNumber, firstName:u.firstName || '', middleName:u.middleName || '', lastName:u.lastName || '', phone:u.phone || '', dob:u.dob || '', address:u.address || '', businessName:u.businessName || '' } });
 });
 
 app.get('/api/deposit-addresses', authMiddleware, (_, res) => {
@@ -354,6 +578,8 @@ function ensureUserThread(user) {
     };
     db.threads.push(thread);
   }
+  if (thread.user !== (user.name || user.email)) { thread.user = user.name || user.email; }
+  if (thread.email !== user.email) { thread.email = user.email; }
   return thread;
 }
 
@@ -365,19 +591,32 @@ app.get('/api/chat/thread', authMiddleware, (req, res) => {
   });
 });
 
+// Realtime stream for a signed-in customer: pushes every new message in their
+// own thread the moment it happens, so admin replies appear without polling.
+app.get('/api/chat/stream', (req, res) => {
+  const userId = userIdFromToken(String(req.query.token || ''));
+  if (!userId) return res.status(401).json({ error: 'Missing or invalid token' });
+  const user = db.users.find(u => u.id === userId);
+  if (!user) return res.status(401).json({ error: 'User not found' });
+  const mine = threadForUser(user);
+  openChatStream(req, res, { userId: user.id, threadId: mine ? mine.id : '' });
+});
+
 app.post('/api/chat/send', authMiddleware, (req, res) => {
   const text = (req.body && typeof req.body.text === 'string' && req.body.text.trim()) || '';
   if (!text) return res.status(400).json({ error: 'Message cannot be empty.' });
+  if (text.length > CHAT_MAX_LEN) return res.status(400).json({ error: `Message is too long (max ${CHAT_MAX_LEN} characters).` });
+  if (chatRateLimited(req.user.id)) return res.status(429).json({ error: 'You are sending messages too quickly. Please wait a moment.' });
   const thread = ensureUserThread(req.user);
   if (!db.messages[thread.id]) db.messages[thread.id] = [];
-  const at = new Date().toISOString();
-  const msg = { from: 'user', text, time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }), at };
+  const msg = makeMessage(db, thread.id, 'user', text);
   db.messages[thread.id].push(msg);
   thread.preview = text;
   thread.time = msg.time;
-  thread.at = at;
+  thread.at = msg.at;
   thread.unread = true; // a new customer message for the admin to see
   saveDB(db);
+  publishChatEvent(thread.id, db.messages[thread.id], { id: thread.id, user: thread.user, email: thread.email, unread: true });
   res.json({ ok: true, thread: { id: thread.id, user: thread.user, email: thread.email, unread: true }, messages: db.messages[thread.id] });
 });
 
@@ -393,6 +632,9 @@ app.get('/api/admin/users', adminMiddleware, (_, res) => {
     status: u.kycStatus === 'approved' ? 'Verified' : u.status === 'suspended' ? 'Suspended' : 'Pending KYC',
     balance: '$' + num(u.balance).toFixed(2), joined:u.joined, lastLogin: u.lastLogin || '',
     kyc: u.kycStatus === 'approved' ? 'Approved' : u.kycStatus === 'rejected' ? 'Rejected' : 'In Review',
+    firstName: u.firstName || '', middleName: u.middleName || '', lastName: u.lastName || '',
+    phone: u.phone || '', dob: u.dob || '', address: u.address || '',
+    businessName: u.businessName || '', type: u.type || 'personal',
   }));
   res.json(users);
 });
@@ -438,6 +680,17 @@ app.get('/api/admin/threads', adminMiddleware, (_, res) => {
   res.json(db.threads);
 });
 
+// Realtime stream for the admin console: pushes every customer message the
+// moment it arrives, on every thread, in every open admin browser.
+app.get('/api/admin/chat/stream', (req, res) => {
+  const given = Buffer.from(String(req.query.token || ''));
+  const expected = Buffer.from(adminToken());
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
+    return res.status(401).json({ error: 'Invalid admin token' });
+  }
+  openChatStream(req, res, { isAdmin: true });
+});
+
 app.get('/api/admin/threads/:id/messages', adminMiddleware, (req, res) => {
   res.json(db.messages[req.params.id] || []);
 });
@@ -445,13 +698,16 @@ app.get('/api/admin/threads/:id/messages', adminMiddleware, (req, res) => {
 app.post('/api/admin/threads/:id/reply', adminMiddleware, (req, res) => {
   const { text } = req.body;
   const id = req.params.id;
+  if (!text || !String(text).trim()) return res.status(400).json({ error: 'Message cannot be empty.' });
+  if (String(text).trim().length > CHAT_MAX_LEN) return res.status(400).json({ error: `Message is too long (max ${CHAT_MAX_LEN} characters).` });
+  if (!db.threads.some(t => t.id === id)) return res.status(404).json({ error: 'Thread not found.' });
   if (!db.messages[id]) db.messages[id] = [];
-  const at = new Date().toISOString();
-  const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-  db.messages[id].push({ from:'admin', text, time, at });
+  const msg = makeMessage(db, id, 'admin', String(text).trim());
+  db.messages[id].push(msg);
   const thread = db.threads.find(t => t.id === id);
-  if (thread) { thread.preview = text; thread.time = time; thread.at = at; thread.unread = false; }
+  if (thread) { thread.preview = msg.text; thread.time = msg.time; thread.at = msg.at; thread.unread = false; }
   saveDB(db);
+  publishChatEvent(id, db.messages[id], thread ? { id: thread.id, user: thread.user, email: thread.email, unread: false } : null);
   res.json({ ok:true, messages: db.messages[id] });
 });
 
@@ -460,18 +716,20 @@ app.post('/api/admin/threads/:id/reply', adminMiddleware, (req, res) => {
 // each conversation one at a time.
 app.post('/api/admin/threads/reply-all', adminMiddleware, (req, res) => {
   const { text } = req.body;
-  if (!text || !String(text).trim()) return res.status(400).json({ error: 'Message cannot be empty.' });
-  const at = new Date().toISOString();
-  const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+  const body = String(text || '').trim();
+  if (!body) return res.status(400).json({ error: 'Message cannot be empty.' });
+  if (body.length > CHAT_MAX_LEN) return res.status(400).json({ error: `Message is too long (max ${CHAT_MAX_LEN} characters).` });
   let delivered = 0;
   for (const thread of (db.threads || [])) {
     if (!db.messages[thread.id]) db.messages[thread.id] = [];
-    db.messages[thread.id].push({ from:'admin', text, time, at });
-    thread.preview = text;
-    thread.time = time;
-    thread.at = at;
+    const msg = makeMessage(db, thread.id, 'admin', body);
+    db.messages[thread.id].push(msg);
+    thread.preview = msg.text;
+    thread.time = msg.time;
+    thread.at = msg.at;
     thread.unread = false;
     delivered++;
+    publishChatEvent(thread.id, db.messages[thread.id], { id: thread.id, user: thread.user, email: thread.email, unread: false });
   }
   saveDB(db);
   res.json({ ok:true, delivered, threads: db.threads });
@@ -527,6 +785,35 @@ app.post('/api/admin/users/:id/verify', adminMiddleware, (req, res) => {
   res.json({ ok:true, status:'approved', email:user.email, name:user.name });
 });
 
+app.patch('/api/admin/users/:id', adminMiddleware, async (req, res) => {
+  const user = db.users.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error:'User not found' });
+  const body = req.body || {};
+  if (typeof body.name === 'string') {
+    const name = body.name.trim();
+    if (!name) return res.status(400).json({ error:'Name is required.' });
+    user.name = name;
+  }
+  if (typeof body.phone === 'string') user.phone = body.phone.trim();
+  if (typeof body.email === 'string') {
+    const email = body.email.trim();
+    if (!email) return res.status(400).json({ error:'Email is required.' });
+    const clash = db.users.find(u => u.id !== user.id && String(u.email).toLowerCase() === email.toLowerCase());
+    if (clash) return res.status(409).json({ error:'An account with this email already exists.' });
+    user.email = email;
+    for (const t of (db.threads || [])) {
+      if (t.userId === user.id) t.email = email;
+    }
+  }
+  if (typeof body.name === 'string') {
+    for (const t of (db.threads || [])) {
+      if (t.userId === user.id) t.user = user.name;
+    }
+  }
+  await saveDB(db);
+  res.json({ ok:true, user:{ id:user.id, name:user.name, email:user.email, phone:user.phone || '' } });
+});
+
 app.post('/api/admin/login', (req, res) => {
   const { email, password } = req.body;
   if (email === 'admin@shieldsafebank.com' && password === 'admin1234') {
@@ -536,11 +823,20 @@ app.post('/api/admin/login', (req, res) => {
   res.status(401).json({ error:'Invalid admin credentials.' });
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`\n  Shield Safe Bank demo server running on http://localhost:${PORT}\n`);
-  console.log(`  Demo login:  demo@shieldsafebank.com / demo1234`);
-  console.log(`  Admin login: admin@shieldsafebank.com / admin1234\n`);
+let server;
+async function main() {
+  db = await loadDB();
+  server = app.listen(PORT, () => {
+    console.log(`\n  Shield Safe Bank demo server running on http://localhost:${PORT}\n`);
+    console.log(`  Storage: ${pool ? 'Postgres (DATABASE_URL)' : 'local store.json'}`);
+    console.log(`  Demo login:  demo@shieldsafebank.com / demo1234`);
+    console.log(`  Admin login: admin@shieldsafebank.com / admin1234\n`);
+  });
+}
+main().catch(err => {
+  console.error('Failed to start server', err);
+  process.exit(1);
 });
 
-process.on('SIGINT', () => { server.close(); process.exit(0); });
-process.on('SIGTERM', () => { server.close(); process.exit(0); });
+process.on('SIGINT', () => { if (server) server.close(); process.exit(0); });
+process.on('SIGTERM', () => { if (server) server.close(); process.exit(0); });

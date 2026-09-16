@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
-import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired } from '../../lib/api';
+import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken } from '../../lib/api';
+import { subscribeToChat, closeChatStream, type ChatEvent } from '../../lib/chatTransport';
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
 import BrandMark from '../../components/BrandMark';
@@ -56,6 +57,11 @@ export default function AdminConsole() {
   const [copied, setCopied] = useState<string>('');
   const [editingBalance, setEditingBalance] = useState<string | null>(null);
   const [balanceInput, setBalanceInput] = useState('');
+  const [editingUser, setEditingUser] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [savingUser, setSavingUser] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [serverOnline, setServerOnline] = useState(true);
   const [authStale, setAuthStale] = useState(false);
@@ -103,13 +109,20 @@ export default function AdminConsole() {
         remote = sr.data.map(m => ({
           email: m.email,
           name: m.name,
-          type: 'personal',
           joined: m.joined || '',
           lastLogin: m.lastLogin || '',
           status: m.kyc === 'Approved' || m.status === 'Verified' ? 'verified' : 'pending',
           balance: parseServerBalance(m.balance),
           accountNumber: m.accountNumber || '',
           serverId: m.id,
+          firstName: m.firstName || '',
+          middleName: m.middleName || '',
+          lastName: m.lastName || '',
+          phone: m.phone || '',
+          dob: m.dob || '',
+          address: m.address || '',
+          businessName: m.businessName || '',
+          type: m.type || 'personal',
         }));
       }
     } catch {
@@ -235,9 +248,32 @@ export default function AdminConsole() {
     reload();
   }
 
+  async function saveUserProfile(u: AdminUserRow) {
+    if (!u.serverId) return;
+    setSavingUser(true);
+    try {
+      await patchAdminUser(u.serverId, { name: editName, email: editEmail, phone: editPhone });
+      setEditingUser(null);
+      await reload();
+    } catch { /* keep the form open so the admin can retry */ }
+    setSavingUser(false);
+  }
+
   // Verifies a user wherever the account actually lives. Accounts created on the
   // shared server (any browser) are verified server-side; browser-only accounts
   // fall back to the local store. Either way the admin can verify everyone.
+  function profileDetails(u: { firstName?: string; middleName?: string; lastName?: string; phone?: string; dob?: string; address?: string; businessName?: string }): string[] {
+    const full = [u.firstName, u.middleName, u.lastName].filter(v => v && String(v).trim()).join(' ');
+    const rows = [
+      full ? `Full name: ${full}` : '',
+      u.phone ? `Phone: ${u.phone}` : '',
+      u.dob ? `DOB: ${u.dob}` : '',
+      u.address ? `Address: ${u.address}` : '',
+      u.businessName ? `Business: ${u.businessName}` : '',
+    ].filter(Boolean);
+    return rows;
+  }
+
   async function approve(row: { email: string; name?: string; serverId?: string }) {
     setVerifying(row.email);
     setVerifyNotice('');
@@ -271,6 +307,22 @@ export default function AdminConsole() {
     const id = setInterval(() => { reload().catch(() => null); }, 5000);
     return () => clearInterval(id);
   }, []);
+
+  // Realtime: new customer messages appear (and bump the unread counter) the
+  // instant they are sent, on every open admin browser, without waiting for the
+  // 5s poll. The poll stays as a safety net for missed events.
+  useEffect(() => {
+    if (!hasAdminToken()) return;
+    subscribeToChat('admin', (event: ChatEvent) => {
+      loadThreads().catch(() => null);
+      if (activeThread === event.threadId) {
+        setMessages(event.messages.map(m => ({ from: m.from, text: m.text, time: m.time, at: m.at })));
+        markAdminThreadRead(event.threadId).catch(() => null);
+      }
+    });
+    return () => { closeChatStream(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasAdminToken(), activeThread]);
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'chat', label: 'Chat Inbox' },
@@ -346,15 +398,18 @@ export default function AdminConsole() {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {kycQueue.map(q => (
-                <div key={q.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', border: '1px solid #123C7C', padding: '10px 14px', background: '#0A2044' }}>
+                <div key={q.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', border: '1px solid #123C7C', padding: '10px 14px', background: '#0A2044' }}>
                   <div style={{ minWidth: 0 }}>
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#E5E7EB', fontWeight: 600, margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{q.name}</p>
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{q.email} · {q.type} signup · {fmtDateTime(q.submitted)}</p>
+                    {profileDetails(q).map(line => (
+                      <p key={line} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#A9C6E8', margin: '3px 0 0', wordBreak: 'break-word' }}>{line}</p>
+                    ))}
                   </div>
                   <button
                     onClick={() => approve(q)}
                     disabled={verifying === q.email}
-                    style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: verifying === q.email ? '#6B7280' : '#1E7A4C', border: 'none', padding: '8px 16px', cursor: verifying === q.email ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+                    style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: verifying === q.email ? '#6B7280' : '#1E7A4C', border: 'none', padding: '8px 16px', cursor: verifying === q.email ? 'default' : 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
                   >
                     {verifying === q.email ? 'VERIFYING…' : 'VERIFY'}
                   </button>
@@ -374,15 +429,18 @@ export default function AdminConsole() {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {pendingUsers.map(u => (
-                <div key={u.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', border: '1px solid #123C7C', padding: '10px 14px', background: '#0A2044' }}>
+                <div key={u.email} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', border: '1px solid #123C7C', padding: '10px 14px', background: '#0A2044' }}>
                   <div style={{ minWidth: 0 }}>
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#E5E7EB', fontWeight: 600, margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name}</p>
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{u.email} · signed up {fmtDateTime(u.joined)}</p>
+                    {profileDetails(u).map(line => (
+                      <p key={line} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#A9C6E8', margin: '3px 0 0', wordBreak: 'break-word' }}>{line}</p>
+                    ))}
                   </div>
                   <button
                     onClick={() => approve(u)}
                     disabled={verifying === u.email}
-                    style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: verifying === u.email ? '#6B7280' : '#1E7A4C', border: 'none', padding: '8px 16px', cursor: verifying === u.email ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+                    style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: verifying === u.email ? '#6B7280' : '#1E7A4C', border: 'none', padding: '8px 16px', cursor: verifying === u.email ? 'default' : 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
                   >
                     {verifying === u.email ? 'VERIFYING…' : 'VERIFY'}
                   </button>
@@ -484,9 +542,59 @@ export default function AdminConsole() {
                 </thead>
                 <tbody>
                   {users.map((u, i) => (
-                    <tr key={u.email} style={{ borderBottom: i < users.length - 1 ? '1px solid #123C7C' : 'none' }}>
-                      <td style={{ padding: '11px 16px', color: '#E5E7EB', fontWeight: 600 }}>{u.name}</td>
-                      <td style={{ padding: '11px 16px', color: '#A9C6E8' }}>{u.email}</td>
+                    <tr key={u.email} style={{ borderBottom: i < users.length - 1 ? '1px solid #123C7C' : 'none', verticalAlign: 'top' }}>
+                      <td style={{ padding: '11px 16px', color: '#E5E7EB', fontWeight: 600 }}>
+                        {editingUser === u.email ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '180px' }}>
+                            <input
+                              value={editName}
+                              onChange={e => setEditName(e.target.value)}
+                              placeholder="Name"
+                              style={{ background: '#0B2B5C', border: '1px solid #4779C4', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#E5E7EB', outline: 'none' }}
+                            />
+                            <input
+                              value={editPhone}
+                              onChange={e => setEditPhone(e.target.value)}
+                              placeholder="Phone"
+                              style={{ background: '#0B2B5C', border: '1px solid #4779C4', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#E5E7EB', outline: 'none' }}
+                            />
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              <button
+                                onClick={() => saveUserProfile(u)}
+                                disabled={savingUser || !u.serverId}
+                                style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#fff', background: '#1E7A4C', border: 'none', padding: '5px 10px', cursor: savingUser ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+                              >{savingUser ? 'SAVING…' : 'SAVE'}</button>
+                              <button
+                                onClick={() => setEditingUser(null)}
+                                style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#E5E7EB', background: '#374151', border: 'none', padding: '5px 8px', cursor: 'pointer' }}
+                              >✕</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            {u.name}
+                            {profileDetails(u).map(line => (
+                              <p key={line} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 400, color: '#A9C6E8', margin: '3px 0 0', wordBreak: 'break-word' }}>{line}</p>
+                            ))}
+                            {u.serverId && (
+                              <button
+                                onClick={() => { setEditingUser(u.email); setEditName(u.name); setEditEmail(u.email); setEditPhone(u.phone || ''); }}
+                                style={{ display: 'block', marginTop: '6px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#fff', background: '#4779C4', border: 'none', padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                              >EDIT</button>
+                            )}
+                          </>
+                        )}
+                      </td>
+                      <td style={{ padding: '11px 16px', color: '#A9C6E8' }}>
+                        {editingUser === u.email ? (
+                          <input
+                            value={editEmail}
+                            onChange={e => setEditEmail(e.target.value)}
+                            placeholder="Email"
+                            style={{ width: '100%', minWidth: '160px', background: '#0B2B5C', border: '1px solid #4779C4', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#E5E7EB', outline: 'none' }}
+                          />
+                        ) : u.email}
+                      </td>
                       <td style={{ padding: '11px 16px', color: '#E5E7EB', fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.04em' }}>{u.accountNumber || '—'}</td>
                       <td style={{ padding: '11px 16px', color: '#E5E7EB', textTransform: 'capitalize' }}>{u.type}</td>
                       <td style={{ padding: '11px 16px', textAlign: 'right' }}>

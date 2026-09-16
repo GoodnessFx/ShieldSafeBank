@@ -1,7 +1,8 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router';
 import { chatIdentity, pushChatMessage, getThreadMessages, markThreadRead, type ChatMessage } from '../lib/localStore';
 import { getMyChatThread, sendChatMessage, markMyChatRead } from '../lib/api';
+import { subscribeToChat, closeChatStream, type ChatEvent } from '../lib/chatTransport';
 
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
@@ -9,6 +10,7 @@ export default function ChatWidget() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sent, setSent] = useState(false);
   const [unreadBadge, setUnreadBadge] = useState(false);
+  const [sending, setSending] = useState(false);
   const openRef = useRef(false);
 
   const identity = chatIdentity();
@@ -16,8 +18,9 @@ export default function ChatWidget() {
   const seenKey = `ssb_chat_seen_${(identity.email || '').toLowerCase()}`;
 
   function applyMessages(list: ChatMessage[]) {
-    setMessages(list);
-    const last = list[list.length - 1];
+    const normalized = list.map((m, i) => ({ ...m, id: m.id || `local${i}` }));
+    setMessages(normalized);
+    const last = normalized[normalized.length - 1];
     if (openRef.current) {
       if (last && last.at) localStorage.setItem(seenKey, String(last.at));
       setUnreadBadge(false);
@@ -26,6 +29,27 @@ export default function ChatWidget() {
       setUnreadBadge(!!(last && last.from === 'admin' && (!last.at || String(last.at) > seen)));
     }
   }
+
+  useEffect(() => {
+    if (!signedIn) return;
+    load();
+    const id = setInterval(() => { load().catch(() => null); }, 5000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedIn]);
+
+  // Live updates: admin replies appear the moment they are sent, and the unread
+  // badge lights up even while the widget is closed.
+  useEffect(() => {
+    if (!signedIn) return;
+    subscribeToChat('user', (event: ChatEvent) => {
+      const mine = event.messages.filter(m => m && typeof m.text === 'string');
+      if (mine.length === 0) return;
+      applyMessages(mine as ChatMessage[]);
+    });
+    return () => { closeChatStream(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedIn]);
 
   // Messages live on the shared server (so they reach the admin on any device);
   // if the server is offline we fall back to the browser's local copy.
@@ -80,19 +104,31 @@ export default function ChatWidget() {
   }
 
   function send() {
-    if (!input.trim()) return;
+    const text = input.trim();
+    if (!text) return;
     const who = chatIdentity();
     if (!who.email) return; // chats require a signed-in user
-    sendChatMessage(input).then(r => {
-      if (r.ok && r.data && r.data.messages) applyMessages(r.data.messages);
+    if (text.length > 2000) return;
+    // Optimistic append: the customer sees their message instantly; the server
+    // reply (or a live event) replaces it with the authoritative copy.
+    const tempId = `pending${Date.now()}`;
+    setMessages(prev => [...prev, { id: tempId, from: 'user', text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), at: new Date().toISOString() }]);
+    setInput('');
+    setSending(true);
+    sendChatMessage(text).then(r => {
+      setSending(false);
+      if (r.ok && r.data && r.data.messages) applyMessages(r.data.messages as ChatMessage[]);
       else {
-        pushChatMessage(who.id, who.user, who.email, input, 'user');
+        pushChatMessage(who.id, who.user, who.email, text, 'user');
         markThreadRead(who.id);
         applyMessages(getThreadMessages(who.id));
       }
+    }).catch(() => {
+      setSending(false);
+      pushChatMessage(who.id, who.user, who.email, text, 'user');
+      applyMessages(getThreadMessages(who.id));
     });
     setSent(true);
-    setInput('');
   }
 
   return (
@@ -122,7 +158,7 @@ export default function ChatWidget() {
                 Talk to a real person. We're available Monday to Friday, 9am to 6pm EST.
               </div>
             ) : messages.map((m, i) => (
-              <div key={i} style={{ display: 'flex', flexDirection: m.from === 'admin' ? 'row' : 'row-reverse', gap: '8px', alignItems: 'flex-end' }}>
+              <div key={m.id || i} style={{ display: 'flex', flexDirection: m.from === 'admin' ? 'row' : 'row-reverse', gap: '8px', alignItems: 'flex-end' }}>
                 {m.from === 'admin' && <div style={{ width: '28px', height: '28px', background: '#123C7C', borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1L1.5 3.5V8C1.5 11.1 4 13.5 7 14C10 13.5 12.5 11.1 12.5 8V3.5L7 1Z" fill="#fff" /><rect x="5.5" y="6" width="3" height="3.5" rx="0.25" fill="none" stroke="#123C7C" strokeWidth="0.8" /><path d="M5.8 6V5.25C5.8 4.284 6.585 3.5 7.55 3.5" stroke="#123C7C" strokeWidth="0.8" strokeLinecap="square" /></svg>
                 </div>}
@@ -146,12 +182,13 @@ export default function ChatWidget() {
               <input
                 value={input}
                 onChange={e => setInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && send()}
-                placeholder="Type a message..."
+                onKeyDown={e => { if (e.key === 'Enter' && !sending) send(); }}
+                maxLength={2000}
+                placeholder={sending ? 'Sending…' : 'Type a message...'}
                 style={{ flex: 1, border: '1px solid #DCE3EA', padding: '8px 10px', fontSize: '13px', color: '#0A2044', background: '#fff', outline: 'none' }}
                 aria-label="Chat message"
               />
-              <button onClick={send} style={{ background: '#123C7C', color: '#fff', border: 'none', padding: '8px 14px', cursor: 'pointer', fontWeight: 500, fontSize: '13px' }}>Send</button>
+              <button onClick={send} disabled={sending} style={{ background: '#123C7C', color: '#fff', border: 'none', padding: '8px 14px', cursor: sending ? 'default' : 'pointer', fontWeight: 500, fontSize: '13px', opacity: sending ? 0.6 : 1 }}>{sending ? '…' : 'Send'}</button>
             </div>
           )}
             </>

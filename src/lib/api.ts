@@ -1,5 +1,5 @@
 import { API_BASE, LOCAL_API_BASE } from './config';
-import { recordAuth, ensureAccount, getUsers, getTransactions as getLocalTxs, addDeposit, addWithdrawal, currentEmail, approveKycQueueItem } from './localStore';
+import { recordAuth, ensureAccount, setUserProfile, getUsers, getTransactions as getLocalTxs, addDeposit, addWithdrawal, currentEmail, approveKycQueueItem } from './localStore';
 import { toAmount } from './format';
 
 interface ApiResult<T> {
@@ -32,7 +32,7 @@ function clearToken() {
 const LOCAL_USERS_KEY = 'ssb_local_users';
 const LOCAL_USER_KEY = 'ssb_local_user';
 
-interface LocalUser { email: string; password: string; name: string; type: string; }
+export interface LocalUser { email: string; password: string; name: string; type: string; firstName?: string; middleName?: string; lastName?: string; phone?: string; dob?: string; address?: string; businessName?: string; }
 
 function readLocalUsers(): Record<string, LocalUser> {
   try { return JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || '{}'); } catch { return {}; }
@@ -55,8 +55,9 @@ function saveLocalSession(email: string, name: string, type: string) {
 
 type PingReason = 'ok' | 'auth' | 'no-session' | 'offline' | 'error';
 
-/** Abort a request after this long so a sleeping backend cannot wedge the UI. */
-const REQUEST_TIMEOUT_MS = 15000;
+/** Abort a request after this long so a sleeping backend cannot wedge the UI.
+ * Render free-tier cold starts commonly take 20–40s, so wait that long. */
+const REQUEST_TIMEOUT_MS = 40000;
 
 async function tryFetch<T>(
   base: string, path: string, authToken: string | null,
@@ -115,6 +116,28 @@ export interface MeData {
   joined: string;
   emailVerified: boolean;
   accountNumber: string;
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  phone?: string;
+  dob?: string;
+  address?: string;
+  businessName?: string;
+}
+
+/** Full identity fields every sign-up collects; survives local/offline mode too. */
+export interface RegisterPayload {
+  email: string;
+  password: string;
+  name: string;
+  type: string;
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  phone?: string;
+  dob?: string;
+  address?: string;
+  businessName?: string;
 }
 
 export interface TransactionData {
@@ -154,21 +177,23 @@ export async function login(email: string, password: string) {
   return r;
 }
 
-export async function register(payload: { email: string; password: string; name: string; type: string }) {
+export async function register(payload: RegisterPayload) {
   const r = await apiFetch<LoginResult>('/auth/register', { method: 'POST', body: payload });
   if (r.ok && r.data?.token) {
     setToken(r.data.token);
     saveSession(payload.email, r.data.user.name || payload.name, payload.type || 'personal');
     recordAuth(payload.email, r.data.user.name || payload.name, 'signup', 'email', payload.type);
+    setUserProfile(payload.email, { name: payload.name, type: payload.type, firstName: payload.firstName, middleName: payload.middleName, lastName: payload.lastName, phone: payload.phone, dob: payload.dob, address: payload.address, businessName: payload.businessName });
   }
   if (!r.ok && r.offline) {
     const users = readLocalUsers();
     if (!users[payload.email.toLowerCase()]) {
-      users[payload.email.toLowerCase()] = { email: payload.email, password: payload.password, name: payload.name, type: payload.type };
+      users[payload.email.toLowerCase()] = { email: payload.email, password: payload.password, name: payload.name, type: payload.type, firstName: payload.firstName, middleName: payload.middleName, lastName: payload.lastName, phone: payload.phone, dob: payload.dob, address: payload.address, businessName: payload.businessName };
       writeLocalUsers(users);
     }
     saveLocalSession(payload.email, payload.name, payload.type);
     recordAuth(payload.email, payload.name, 'signup', 'email', payload.type);
+    setUserProfile(payload.email, { name: payload.name, type: payload.type, firstName: payload.firstName, middleName: payload.middleName, lastName: payload.lastName, phone: payload.phone, dob: payload.dob, address: payload.address, businessName: payload.businessName });
     return { data: null, ok: true, offline: true };
   }
   return r;
@@ -242,6 +267,21 @@ export async function getMe() {
   const serverKyc = server && server.kycStatus ? String(server.kycStatus) : '';
   const kycStatus = stored.status === 'verified' ? 'approved' : (serverKyc || 'pending');
   const status = stored.status === 'verified' ? 'approved' : (server && server.status ? String(server.status) : 'pending');
+  // Full profile details: server wins when present, local merge never erases.
+  const pick = (...vals: unknown[]): string => {
+    for (const v of vals) if (typeof v === 'string' && v.trim()) return v.trim();
+    return '';
+  };
+  const profile = {
+    firstName: pick(server && server.firstName, stored.firstName),
+    middleName: pick(server && server.middleName, stored.middleName),
+    lastName: pick(server && server.lastName, stored.lastName),
+    phone: pick(server && server.phone, stored.phone),
+    dob: pick(server && server.dob, stored.dob),
+    address: pick(server && server.address, stored.address),
+    businessName: pick(server && server.businessName, stored.businessName),
+  };
+  setUserProfile(email, { ...profile });
 
   return {
     data: {
@@ -255,10 +295,25 @@ export async function getMe() {
       joined: stored.joined || (server ? server.joined : new Date().toLocaleDateString()),
       emailVerified: server ? !!server.emailVerified : true,
       accountNumber: stored.accountNumber,
+      ...profile,
     } as MeData,
     ok: true,
     offline: !r.ok,
   };
+}
+
+export async function updateProfile(profile: { name?: string; firstName?: string; middleName?: string; lastName?: string; phone?: string; dob?: string; address?: string; businessName?: string }) {
+  const email = currentEmail();
+  if (email) setUserProfile(email, profile);
+  const r = await apiFetch<{ ok: boolean; user?: MeData }>('/auth/profile', { method: 'POST', body: profile });
+  if (r.ok && r.data?.user && email) {
+    setUserProfile(email, {
+      name: r.data.user.name, firstName: r.data.user.firstName, middleName: r.data.user.middleName,
+      lastName: r.data.user.lastName, phone: r.data.user.phone, dob: r.data.user.dob,
+      address: r.data.user.address, businessName: r.data.user.businessName,
+    });
+  }
+  return r;
 }
 
 export async function getTransactions() {
@@ -404,6 +459,11 @@ function clearAdminToken() {
   } catch { /* storage unavailable */ }
 }
 
+/** The realtime transport needs the admin token (EventSource cannot set headers). */
+export function getAdminToken(): string {
+  return adminToken;
+}
+
 /** Signs the admin out for real: token, issuing base and flag together. */
 export function adminLogout() {
   clearAdminToken();
@@ -469,7 +529,7 @@ export async function adminLogin(email: string, password: string, totp = ''): Pr
 }
 
 export async function getAdminUsers() {
-  return adminFetch<{ id: string; name: string; email: string; status: string; balance: string; joined: string; lastLogin: string; kyc: string; accountNumber?: string }[]>('/admin/users');
+  return adminFetch<{ id: string; name: string; email: string; status: string; balance: string; joined: string; lastLogin: string; kyc: string; accountNumber?: string; firstName: string; middleName: string; lastName: string; phone: string; dob: string; address: string; businessName: string; type: string }[]>('/admin/users');
 }
 
 // Authenticated liveness probe for the deployed console. Unlike the public
@@ -503,7 +563,7 @@ async function pingOnce(base: string, timeoutMs: number): Promise<{ online: bool
 }
 
 export async function getAdminKyc() {
-  return adminFetch<{ id: string; name: string; email: string; type: string; submitted: string; docs: string; status: string }[]>('/admin/kyc');
+  return adminFetch<{ id: string; name: string; email: string; type: string; submitted: string; docs: string; status: string; userId?: string; kyc?: string; statusLabel?: string; firstName?: string; middleName?: string; lastName?: string; phone?: string; dob?: string; address?: string; businessName?: string }[]>('/admin/kyc');
 }
 
 export async function decideKyc(id: string, action: 'approve' | 'reject') {
@@ -561,9 +621,42 @@ export async function setAdminUserBalance(userId: string, balance: number) {
   return adminFetch<{ ok: boolean; balance: number }>(`/admin/users/${userId}/balance`, { method: 'POST', body: { balance } });
 }
 
+export async function patchAdminUser(userId: string, profile: { name?: string; email?: string; phone?: string }) {
+  return adminFetch<{ ok: boolean; user?: { id: string; name: string; email: string; phone: string } }>(`/admin/users/${userId}`, { method: 'PATCH', body: profile });
+}
+
 export async function verifyAdminUser(userId: string) {
   return adminFetch<{ ok: boolean; status: string; email: string; name: string }>(`/admin/users/${userId}/verify`, { method: 'POST' });
 }
 
+/** The realtime transport needs the same token REST calls use. */
+export function getToken(): string {
+  return token || '';
+}
+
 export { clearToken, setToken };
 export function hasToken() { return !!token; }
+
+/**
+ * Fire-and-forget ping so a sleeping Render instance starts warming as soon as
+ * the app loads, before the customer opens chat or the admin console.
+ *
+ * The local fallback base is only pinged when the page itself is on localhost —
+ * from a deployed page `http://localhost:4000` can never answer, and pinging it
+ * would only add connection-refused noise to the console.
+ */
+export function wakeBackend() {
+  const ping = (base: string) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    fetch(`${base}/health`, { method: 'GET', signal: controller.signal })
+      .catch(() => null)
+      .finally(() => clearTimeout(timer));
+  };
+  ping(API_BASE);
+  const onLocalHost = typeof window !== 'undefined'
+    && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
+  if (onLocalHost && API_BASE !== LOCAL_API_BASE) ping(LOCAL_API_BASE);
+}
+
+wakeBackend();

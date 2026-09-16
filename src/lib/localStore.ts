@@ -13,6 +13,14 @@ export interface StoreUser {
   adminAdjusted?: boolean;
   /** Set once the seeded opening balance has been applied. */
   seedBalanceApplied?: boolean;
+  /** Full KYC identity details collected at sign-up (never required to be complete). */
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  phone?: string;
+  dob?: string;
+  address?: string;
+  businessName?: string;
 }
 
 export interface ActivityEvent {
@@ -36,6 +44,7 @@ export interface LocalTx {
 }
 
 export interface ChatMessage {
+  id?: string;
   from: 'user' | 'admin';
   text: string;
   time: string;
@@ -60,6 +69,16 @@ export interface KycItem {
   submitted: string;
   docs: string;
   status: string;
+  /** Identity details collected at sign-up, shown to the reviewing admin. */
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  phone?: string;
+  dob?: string;
+  address?: string;
+  businessName?: string;
+  /** Server user id when the account exists on the shared server. */
+  userId?: string;
 }
 
 const USERS_KEY = 'ssb_live_users';
@@ -227,6 +246,30 @@ export function ensureAccount(email: string, name = '', type = 'personal'): Stor
   return user;
 }
 
+/** Persists full KYC identity details for an account (merge, never erase). */
+export function setUserProfile(email: string, profile: Partial<Pick<StoreUser, 'name' | 'firstName' | 'middleName' | 'lastName' | 'phone' | 'dob' | 'address' | 'businessName' | 'type'>>): StoreUser | null {
+  if (!email) return null;
+  const users = read<Record<string, StoreUser>>(USERS_KEY, {});
+  const oid = email.toLowerCase();
+  const user = users[oid] || {
+    email,
+    name: profile.name || email,
+    type: profile.type || 'personal',
+    joined: nowIso(),
+    lastLogin: nowIso(),
+    status: 'pending' as const,
+    balance: 0,
+    accountNumber: generateAccountNumber(),
+  };
+  for (const key of ['name', 'firstName', 'middleName', 'lastName', 'phone', 'dob', 'address', 'businessName', 'type'] as const) {
+    const v = profile[key];
+    if (typeof v === 'string') (user as unknown as Record<string, string>)[key] = v;
+  }
+  users[oid] = user;
+  write(USERS_KEY, users);
+  return user;
+}
+
 export function recordAuth(email: string, name: string, action: 'signup' | 'login', via: 'email' | 'google', type = 'personal') {
   const users = read<Record<string, StoreUser>>(USERS_KEY, {});
   const oid = email.toLowerCase();
@@ -331,7 +374,7 @@ export function pushChatMessage(id: string, user: string, email: string, text: s
   write(THREADS_KEY, threads);
 
   const list = messages[id] || [];
-  list.push({ from, text, time, at });
+  list.push({ id: `local${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, from, text, time, at });
   write(MESSAGES_KEY, { ...messages, [id]: list });
 }
 
@@ -374,6 +417,13 @@ export function getKycQueue(): KycItem[] {
       submitted: u.joined,
       docs: 'ID and liveness check',
       status: 'pending',
+      firstName: u.firstName || '',
+      middleName: u.middleName || '',
+      lastName: u.lastName || '',
+      phone: u.phone || '',
+      dob: u.dob || '',
+      address: u.address || '',
+      businessName: u.businessName || '',
     }));
 }
 

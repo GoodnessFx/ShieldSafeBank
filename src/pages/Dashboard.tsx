@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../lib/config';
-import { getMe, getTransactions, requestWithdrawal, submitDeposit, type MeData, type TransactionData } from '../lib/api';
+import { getMe, getTransactions, requestWithdrawal, submitDeposit, updateProfile, type MeData, type TransactionData } from '../lib/api';
 import { fmtUSD, fmtDateTimeShort, toAmount, fmtText } from '../lib/format';
 import CardScanner, { readCardScan, writeCardScan, type CardScanResult } from '../components/CardScanner';
 import Toast, { type ToastData } from '../components/Toast';
@@ -66,7 +66,45 @@ export default function Dashboard() {
   const [cardScan, setCardScan] = useState<CardScanResult | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastData[]>([]);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState('');
+  const [profileForm, setProfileForm] = useState({ firstName: '', middleName: '', lastName: '', phone: '', dob: '', address: '', businessName: '' });
   const balance = useCountUp(balanceTarget, 1800);
+
+  function profileFromUser(u: MeData | null) {
+    return {
+      firstName: u?.firstName || '',
+      middleName: u?.middleName || '',
+      lastName: u?.lastName || '',
+      phone: u?.phone || '',
+      dob: u?.dob || '',
+      address: u?.address || '',
+      businessName: u?.businessName || '',
+    };
+  }
+
+  async function saveProfile() {
+    const p = profileForm;
+    if (!p.firstName.trim() || !p.lastName.trim()) { setProfileError('First name and last name are required.'); return; }
+    if (p.phone.trim() && !/^[+0-9()\-\s.]{7,20}$/.test(p.phone.trim())) { setProfileError('Enter a valid phone number, e.g. +1 555 010 2233.'); return; }
+    setProfileError('');
+    setProfileSaving(true);
+    const r = await updateProfile({
+      firstName: p.firstName.trim(), middleName: p.middleName.trim(), lastName: p.lastName.trim(),
+      phone: p.phone.trim(), dob: p.dob, address: p.address.trim(), businessName: p.businessName.trim(),
+    });
+    setProfileSaving(false);
+    if (!r.ok && !r.offline) {
+      const msg = (r.data as { error?: string; message?: string } | null);
+      setProfileError(msg && (msg.error || msg.message) ? String(msg.error || msg.message) : 'Changes could not be saved.');
+      return;
+    }
+    setEditingProfile(false);
+    const me = await getMe();
+    if (me.ok && me.data) setUser(me.data);
+    pushToast('Profile updated', 'Your details were saved. Our verification team sees the updated version.');
+  }
 
   function currentEmail(): string {
     try {
@@ -221,6 +259,64 @@ export default function Dashboard() {
               ) : <StatusPill label="Verified" color="#1E7A4C" />}
               <StatusPill label="2FA Active" color="#123C7C" border />
             </div>
+          </div>
+
+          {/* Profile details — collected at sign-up, editable here, visible to the admin */}
+          <div id="profile" style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '28px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap', marginBottom: '18px' }}>
+              <div>
+                <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#0A2044', margin: '0 0 4px' }}>Profile details</h2>
+                <p style={{ fontSize: '13px', color: '#6B7280', margin: 0 }}>
+                  The identity information we hold for your account. Our verification team sees the same details.
+                </p>
+              </div>
+              {!editingProfile ? (
+                <button onClick={() => { setProfileForm(profileFromUser(user)); setEditingProfile(true); }}
+                  style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 600, color: '#fff', background: '#123C7C', border: 'none', padding: '9px 18px', cursor: 'pointer' }}>
+                  EDIT DETAILS
+                </button>
+              ) : (
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button onClick={saveProfile} disabled={profileSaving}
+                    style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 600, color: '#fff', background: profileSaving ? '#6B7280' : '#1E7A4C', border: 'none', padding: '9px 18px', cursor: profileSaving ? 'default' : 'pointer' }}>
+                    {profileSaving ? 'SAVING…' : 'SAVE'}
+                  </button>
+                  <button onClick={() => { setEditingProfile(false); setProfileError(''); }}
+                    style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 600, color: '#6B7280', background: '#F4F6F8', border: '1px solid #DCE3EA', padding: '9px 18px', cursor: 'pointer' }}>
+                    CANCEL
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {profileError && <p style={{ fontSize: '13px', color: '#DC2626', margin: '0 0 14px' }}>{profileError}</p>}
+
+            {editingProfile ? (
+              <div className="grid sm:grid-cols-3 gap-4">
+                <DashField label="First name" value={profileForm.firstName} onChange={v => setProfileForm(p => ({ ...p, firstName: v }))} />
+                <DashField label="Middle name" value={profileForm.middleName} onChange={v => setProfileForm(p => ({ ...p, middleName: v }))} />
+                <DashField label="Last name" value={profileForm.lastName} onChange={v => setProfileForm(p => ({ ...p, lastName: v }))} />
+                <DashField label="Phone number" value={profileForm.phone} onChange={v => setProfileForm(p => ({ ...p, phone: v }))} placeholder="+1 555 010 2233" />
+                <DashField label="Date of birth" value={profileForm.dob} onChange={v => setProfileForm(p => ({ ...p, dob: v }))} type="date" />
+                <DashField label="Business name" value={profileForm.businessName} onChange={v => setProfileForm(p => ({ ...p, businessName: v }))} placeholder="Optional" />
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <DashField label="Residential address" value={profileForm.address} onChange={v => setProfileForm(p => ({ ...p, address: v }))} placeholder="Street, city, state, ZIP" />
+                </div>
+              </div>
+            ) : (
+              <div className="grid sm:grid-cols-3 gap-4" style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px' }}>
+                <ProfileRow label="Full name" value={[user?.firstName, user?.middleName, user?.lastName].filter(Boolean).join(' ') || user?.name || '—'} />
+                <ProfileRow label="Phone number" value={user?.phone || '—'} />
+                <ProfileRow label="Date of birth" value={user?.dob || '—'} />
+                <ProfileRow label="Email address" value={user?.email || '—'} />
+                <ProfileRow label="Account number" value={user?.accountNumber || '—'} />
+                <ProfileRow label="Account type" value={(user?.type || 'personal').replace(/^\w/, c => c.toUpperCase())} />
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <ProfileRow label="Residential address" value={user?.address || '—'} />
+                </div>
+                {user?.businessName && <div style={{ gridColumn: '1 / -1' }}><ProfileRow label="Business name" value={user.businessName} /></div>}
+              </div>
+            )}
           </div>
 
           {/* Card verification */}
@@ -594,5 +690,24 @@ function StatusPill({ label, color, border }: { label: string; color: string; bo
     <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#fff', background: border ? 'transparent' : color, border: border ? '1px solid #4779C4' : 'none', padding: '3px 10px', letterSpacing: '0.04em' }}>
       {label}
     </span>
+  );
+}
+
+function ProfileRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', margin: '0 0 3px' }}>{label}</p>
+      <p style={{ fontSize: '13.5px', color: '#0A2044', margin: 0, wordBreak: 'break-word' }}>{value}</p>
+    </div>
+  );
+}
+
+function DashField({ label, value, onChange, type, placeholder }: { label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string }) {
+  return (
+    <div>
+      <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4779C4', display: 'block', marginBottom: '6px' }}>{label}</label>
+      <input type={type || 'text'} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        style={{ width: '100%', border: '1px solid #DCE3EA', padding: '10px 12px', fontSize: '14px', color: '#0A2044', background: '#fff', outline: 'none', boxSizing: 'border-box' }} />
+    </div>
   );
 }
