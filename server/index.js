@@ -392,6 +392,60 @@ function chatRateLimited(userId) {
   return false;
 }
 
+/* ---------------------------------------------------------------------------
+ * "An agent will get to you soon" acknowledgement.
+ *
+ * A customer is never blocked from sending more messages: every message simply
+ * restarts a quiet timer for their thread, so they can send as many as they
+ * like, whenever they like. When the thread has been quiet for
+ * AUTO_REPLY_DELAY_MS and the customer still has the last word, exactly one
+ * automated admin note is appended so nobody is left wondering whether they
+ * were heard.
+ *
+ * The note is stored and streamed like any other message, so the customer sees
+ * it immediately (SSE, or the widget's 5s poll) and it shows up in the admin
+ * Chat Inbox too. It never repeats while the customer stays quiet, and a real
+ * admin reply cancels it. It deliberately leaves `unread` and the thread preview
+ * untouched, so the console still shows the customer's own words and still flags
+ * their messages as unread for a human.
+ * ------------------------------------------------------------------------- */
+const AUTO_REPLY_DELAY_MS = Number(process.env.AUTO_REPLY_DELAY_MS) || 60000;
+const AUTO_REPLY_TEXT = 'Thanks for your message — an agent will get to you soon.';
+const autoReplyTimers = new Map();
+
+function cancelAutoReply(threadId) {
+  const timer = autoReplyTimers.get(threadId);
+  if (timer) { clearTimeout(timer); autoReplyTimers.delete(threadId); }
+}
+
+function sendAutoReply(threadId) {
+  const thread = (db.threads || []).find(t => t.id === threadId);
+  if (!thread) return;
+  const list = db.messages[threadId] || [];
+  const last = list[list.length - 1];
+  // Only reassure a customer who is still waiting alone in the thread: if an
+  // admin answered (or this note is already the last message) there is nothing
+  // to acknowledge.
+  if (!last || last.from !== 'user') return;
+  const msg = { ...makeMessage(db, threadId, 'admin', AUTO_REPLY_TEXT), auto: true };
+  list.push(msg);
+  db.messages[threadId] = list;
+  saveDB(db);
+  publishChatEvent(threadId, list, { id: thread.id, user: thread.user, email: thread.email, unread: !!thread.unread });
+  console.log(`[chat] auto-acknowledged quiet thread ${threadId}`);
+}
+
+function scheduleAutoReply(threadId) {
+  cancelAutoReply(threadId);
+  const timer = setTimeout(() => {
+    autoReplyTimers.delete(threadId);
+    sendAutoReply(threadId);
+  }, AUTO_REPLY_DELAY_MS);
+  // The timer ends with the process, so it must never keep one alive.
+  if (typeof timer.unref === 'function') timer.unref();
+  autoReplyTimers.set(threadId, timer);
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -617,6 +671,10 @@ app.post('/api/chat/send', authMiddleware, (req, res) => {
   thread.unread = true; // a new customer message for the admin to see
   saveDB(db);
   publishChatEvent(thread.id, db.messages[thread.id], { id: thread.id, user: thread.user, email: thread.email, unread: true });
+  // Restart the reassurance timer: one automated note if the customer is still
+  // waiting after AUTO_REPLY_DELAY_MS. Sending again simply resets it, so the
+  // customer can keep writing as much as they like.
+  scheduleAutoReply(thread.id);
   res.json({ ok: true, thread: { id: thread.id, user: thread.user, email: thread.email, unread: true }, messages: db.messages[thread.id] });
 });
 
@@ -701,6 +759,8 @@ app.post('/api/admin/threads/:id/reply', adminMiddleware, (req, res) => {
   if (!text || !String(text).trim()) return res.status(400).json({ error: 'Message cannot be empty.' });
   if (String(text).trim().length > CHAT_MAX_LEN) return res.status(400).json({ error: `Message is too long (max ${CHAT_MAX_LEN} characters).` });
   if (!db.threads.some(t => t.id === id)) return res.status(404).json({ error: 'Thread not found.' });
+  // A human answered, so the automated acknowledgement is no longer needed.
+  cancelAutoReply(id);
   if (!db.messages[id]) db.messages[id] = [];
   const msg = makeMessage(db, id, 'admin', String(text).trim());
   db.messages[id].push(msg);
@@ -721,6 +781,8 @@ app.post('/api/admin/threads/reply-all', adminMiddleware, (req, res) => {
   if (body.length > CHAT_MAX_LEN) return res.status(400).json({ error: `Message is too long (max ${CHAT_MAX_LEN} characters).` });
   let delivered = 0;
   for (const thread of (db.threads || [])) {
+    // Everyone just heard from a human, so drop their pending auto-acknowledgement.
+    cancelAutoReply(thread.id);
     if (!db.messages[thread.id]) db.messages[thread.id] = [];
     const msg = makeMessage(db, thread.id, 'admin', body);
     db.messages[thread.id].push(msg);

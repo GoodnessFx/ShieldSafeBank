@@ -8,10 +8,13 @@ export default function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [sent, setSent] = useState(false);
   const [unreadBadge, setUnreadBadge] = useState(false);
-  const [sending, setSending] = useState(false);
   const openRef = useRef(false);
+  // Customers may send as many messages as they like, one after another, so
+  // several requests can be in flight at once. Each send takes a ticket and only
+  // the newest response is allowed to replace the list — an older one would be
+  // missing the messages that followed it.
+  const sendSeqRef = useRef(0);
 
   const identity = chatIdentity();
   const signedIn = !!identity.email;
@@ -103,32 +106,44 @@ export default function ChatWidget() {
     load(); // recompute the unread badge for the closed trigger
   }
 
+  /** Keeps a message in this browser when the shared server did not take it. */
+  function storeLocally(who: { id: string; user: string; email: string }, text: string) {
+    pushChatMessage(who.id, who.user, who.email, text, 'user');
+    markThreadRead(who.id);
+  }
+
   function send() {
     const text = input.trim();
     if (!text) return;
     const who = chatIdentity();
     if (!who.email) return; // chats require a signed-in user
     if (text.length > 2000) return;
-    // Optimistic append: the customer sees their message instantly; the server
-    // reply (or a live event) replaces it with the authoritative copy.
-    const tempId = `pending${Date.now()}`;
+    // Optimistic append: the customer sees their own message instantly, and the
+    // input is cleared so they can immediately type the next one. Nothing here
+    // blocks further messages — the server acknowledges a quiet thread with
+    // "an agent will get to you soon" instead of closing the conversation.
+    const tempId = `pending${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
     setMessages(prev => [...prev, { id: tempId, from: 'user', text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), at: new Date().toISOString() }]);
     setInput('');
-    setSending(true);
-    sendChatMessage(text).then(r => {
-      setSending(false);
-      if (r.ok && r.data && r.data.messages) applyMessages(r.data.messages as ChatMessage[]);
-      else {
-        pushChatMessage(who.id, who.user, who.email, text, 'user');
-        markThreadRead(who.id);
-        applyMessages(getThreadMessages(who.id));
-      }
-    }).catch(() => {
-      setSending(false);
-      pushChatMessage(who.id, who.user, who.email, text, 'user');
-      applyMessages(getThreadMessages(who.id));
-    });
-    setSent(true);
+    const seq = ++sendSeqRef.current;
+    const isNewest = () => seq === sendSeqRef.current;
+    sendChatMessage(text)
+      .then(r => {
+        if (r.ok && r.data && r.data.messages) {
+          // Only the newest response may replace the list: an older one would be
+          // missing the messages sent after it.
+          if (isNewest()) applyMessages(r.data.messages as ChatMessage[]);
+          return;
+        }
+        // Server rejected or unreachable: the message still exists in this
+        // browser, and the poll uploads it again once the backend is reachable.
+        storeLocally(who, text);
+        if (isNewest()) applyMessages(getThreadMessages(who.id));
+      })
+      .catch(() => {
+        storeLocally(who, text);
+        if (isNewest()) applyMessages(getThreadMessages(who.id));
+      });
   }
 
   return (
@@ -172,25 +187,21 @@ export default function ChatWidget() {
             ))}
           </div>
 
-          {/* Input */}
-          {sent ? (
-            <div style={{ borderTop: '1px solid #DCE3EA', padding: '16px', fontSize: '13px', color: '#1E7A4C' }}>
-              Message received. One of our team members will reply here.
-            </div>
-          ) : (
-            <div style={{ borderTop: '1px solid #DCE3EA', padding: '10px', display: 'flex', gap: '8px' }}>
-              <input
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !sending) send(); }}
-                maxLength={2000}
-                placeholder={sending ? 'Sending…' : 'Type a message...'}
-                style={{ flex: 1, border: '1px solid #DCE3EA', padding: '8px 10px', fontSize: '13px', color: '#0A2044', background: '#fff', outline: 'none' }}
-                aria-label="Chat message"
-              />
-              <button onClick={send} disabled={sending} style={{ background: '#123C7C', color: '#fff', border: 'none', padding: '8px 14px', cursor: sending ? 'default' : 'pointer', fontWeight: 500, fontSize: '13px', opacity: sending ? 0.6 : 1 }}>{sending ? '…' : 'Send'}</button>
-            </div>
-          )}
+          {/* Always available: customers may send as many messages as they like,
+              and the automated "an agent will get to you soon" note arrives in
+              the thread after a minute of silence without closing the input. */}
+          <div style={{ borderTop: '1px solid #DCE3EA', padding: '10px', display: 'flex', gap: '8px' }}>
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') send(); }}
+              maxLength={2000}
+              placeholder="Type a message..."
+              style={{ flex: 1, border: '1px solid #DCE3EA', padding: '8px 10px', fontSize: '13px', color: '#0A2044', background: '#fff', outline: 'none' }}
+              aria-label="Chat message"
+            />
+            <button onClick={send} style={{ background: '#123C7C', color: '#fff', border: 'none', padding: '8px 14px', cursor: 'pointer', fontWeight: 500, fontSize: '13px' }}>Send</button>
+          </div>
             </>
           )}
         </div>

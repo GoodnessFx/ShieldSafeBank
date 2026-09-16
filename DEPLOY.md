@@ -23,6 +23,22 @@ If `DATABASE_URL` is not set, the server still falls back to a local
 `server/data/store.json` file (or `DATA_DIR/store.json`) so local development
 works without Postgres.
 
+### Chat auto-acknowledgement
+
+Customers can send unlimited chat messages — nothing closes the input after the
+first one. Once a thread has been quiet for `AUTO_REPLY_DELAY_MS` (default
+`60000`, i.e. one minute) and the customer still has the last word, the server
+appends a single automated note, "Thanks for your message — an agent will get to
+you soon.", which the customer sees in the thread and which also appears in the
+admin Chat Inbox. Sending another message simply restarts the timer, the note
+never repeats while the customer stays quiet, and a real admin reply (or
+**Reply to All**) cancels it. Override the delay on the API service when you want
+a longer or shorter wait:
+
+```
+AUTO_REPLY_DELAY_MS=120000
+```
+
 ## 1b. Supabase Postgres (`DATABASE_URL`)
 
 Chats, users, balances and KYC now live in Postgres so they survive Render
