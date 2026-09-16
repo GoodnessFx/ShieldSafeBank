@@ -4,21 +4,27 @@ React + Vite + Tailwind CSS project running inside Figma Make.
 
 ## Running everything (app + shared server)
 
-```
-npm start
-```
+### Deployed
 
-That one command starts **both** services:
+- **App (Pxxl, static):** it only builds the frontend (`pnpm run build`) and
+  serves `dist/` through `node start.mjs` — a plain-Node static server with no
+  installs, no Vite and no writes, safe for read-only runtime filesystems.
+  Pxxl runs that file, so never put `pnpm install` or dev-server commands in
+  the container start path.
+- **Shared server (Render):** chats, users, verification and balances live here
+  (`server/` on Render). **Keep this running**: it is what makes the admin
+  panel show everyone from every browser/device. The built frontend reaches it
+  automatically (anything that is not localhost uses the hosted API base, see
+  `src/lib/config.ts`).
 
-- **App (dev)** → http://localhost:8443 (or `$PORT`)
-- **Shared server** → http://localhost:4000 — chats, users, verification and
-  balances live here. **Keep this running**: it is what makes the admin panel
-  show everyone from every browser/device. Press `Ctrl+C` to stop both.
+### Local development
 
-Useful pieces:
-
-- `npm run start:app` — only the app
-- `npm run start:server` — only the shared server
+- `npm start` → runs `node start.mjs` (serves the built `dist/`)
+- `npm run start:dev` → Vite dev server (auto-runs the shared backend too via
+  the `/api` dev proxy only when it is running locally)
+- `npm run build` → production build into `dist/`
+- Shared server locally: `node server/index.js` (needs `server/node_modules`,
+  install via `pnpm install` inside `server/`)
 
 Admin console: `/xk9-admin-console-7f3a` (login `admin@shieldsafebank.com` /
 `admin1234`).
