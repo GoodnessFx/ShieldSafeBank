@@ -417,6 +417,28 @@ app.post('/api/admin/threads/:id/reply', adminMiddleware, (req, res) => {
   res.json({ ok:true, messages: db.messages[id] });
 });
 
+// Admin broadcasts a single reply to every open customer thread. Lets an admin
+// reach everyone from their own browser in one click instead of replying to
+// each conversation one at a time.
+app.post('/api/admin/threads/reply-all', adminMiddleware, (req, res) => {
+  const { text } = req.body;
+  if (!text || !String(text).trim()) return res.status(400).json({ error: 'Message cannot be empty.' });
+  const at = new Date().toISOString();
+  const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+  let delivered = 0;
+  for (const thread of (db.threads || [])) {
+    if (!db.messages[thread.id]) db.messages[thread.id] = [];
+    db.messages[thread.id].push({ from:'admin', text, time, at });
+    thread.preview = text;
+    thread.time = time;
+    thread.at = at;
+    thread.unread = false;
+    delivered++;
+  }
+  saveDB(db);
+  res.json({ ok:true, delivered, threads: db.threads });
+});
+
 // Marks a thread as read so its unread badge clears on the admin console.
 app.post('/api/admin/threads/:id/read', adminMiddleware, (req, res) => {
   const thread = db.threads.find(t => t.id === req.params.id);

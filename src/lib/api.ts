@@ -1,4 +1,4 @@
-import { API_BASE } from './config';
+import { API_BASE, LOCAL_API_BASE } from './config';
 import { recordAuth, ensureAccount, getUsers, getTransactions as getLocalTxs, addDeposit, addWithdrawal, currentEmail, approveKycQueueItem } from './localStore';
 import { toAmount } from './format';
 
@@ -53,28 +53,42 @@ function saveLocalSession(email: string, name: string, type: string) {
   setToken('local');
 }
 
-async function apiFetch<T>(path: string, opts?: { method?: string; body?: unknown }): Promise<ApiResult<T>> {
+async function tryFetch<T>(
+  base: string, path: string, authToken: string | null,
+  onAuthFail: () => void,
+  opts?: { method?: string; body?: unknown },
+): Promise<ApiResult<T>> {
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch(`${API_BASE}${path}`, {
+    if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+    const res = await fetch(`${base}${path}`, {
       method: opts?.method || 'GET',
       headers,
       body: opts?.body ? JSON.stringify(opts.body) : undefined,
     });
     if (res.status === 401) {
-      if (token !== 'local') clearToken();
+      if (authToken !== 'local') onAuthFail();
       return { data: null, ok: false, offline: false };
     }
     if (res.status === 404 || res.status === 405) {
       return { data: null, ok: false, offline: true };
     }
     const json = await res.json();
-    if (!res.ok) return { data: json as T, ok: false, offline: false };
+    if (!res.ok) return { data: json as Errorable<T>, ok: false, offline: false };
     return { data: json as T, ok: true, offline: false };
   } catch {
     return { data: null, ok: false, offline: true };
   }
+}
+
+async function apiFetch<T>(path: string, opts?: { method?: string; body?: unknown }): Promise<ApiResult<T>> {
+  const r = await tryFetch<T>(API_BASE, path, token || '', clearToken, opts);
+  if (r.ok) return r;
+  if (!r.offline) return r;
+  // Primary backend unreachable — retry against the local shared server so
+  // chats, users and balances still sync across every browser (including
+  // incognito), instead of silently degrading to per-browser localStorage.
+  return tryFetch<T>(LOCAL_API_BASE, path, token || '', clearToken, opts);
 }
 
 export interface MeData {
@@ -322,30 +336,19 @@ function setAdminToken(t: string) {
   sessionStorage.setItem('ssb_admin', '1');
 }
 
+function clearAdminToken() {
+  adminToken = '';
+  sessionStorage.removeItem('ssb_admin_token');
+  sessionStorage.removeItem('ssb_admin');
+}
+
 async function adminFetch<T>(path: string, opts?: { method?: string; body?: unknown }): Promise<ApiResult<T>> {
-  try {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
-    const res = await fetch(`${API_BASE}${path}`, {
-      method: opts?.method || 'GET',
-      headers,
-      body: opts?.body ? JSON.stringify(opts.body) : undefined,
-    });
-    if (res.status === 401) {
-      adminToken = '';
-      sessionStorage.removeItem('ssb_admin_token');
-      sessionStorage.removeItem('ssb_admin');
-      return { data: null, ok: false, offline: false };
-    }
-    if (res.status === 404 || res.status === 405) {
-      return { data: null, ok: false, offline: true };
-    }
-    const json = await res.json();
-    if (!res.ok) return { data: json as Errorable<T>, ok: false, offline: false };
-    return { data: json as T, ok: true, offline: false };
-  } catch {
-    return { data: null, ok: false, offline: true };
-  }
+  const r = await tryFetch<T>(API_BASE, path, adminToken, clearAdminToken, opts);
+  if (r.ok) return r;
+  if (!r.offline) return r;
+  // Primary backend unreachable — retry against the local shared server so the
+  // admin console keeps working (same chats, users, balances as every browser).
+  return tryFetch<T>(LOCAL_API_BASE, path, adminToken, clearAdminToken, opts);
 }
 
 export async function adminLogin(email: string, password: string, totp = ''): Promise<ApiResult<AdminLoginResult>> {
@@ -369,12 +372,20 @@ export async function getAdminUsers() {
 // /api/health check it carries the admin token, so a 401 (expired token)
 // resolves honestly as a sign-in problem rather than as "the server is down".
 export async function pingAdminServer(timeoutMs = 20000): Promise<{ online: boolean; reason: 'ok' | 'auth' | 'offline' | 'error' }> {
+  const probe = await pingOnce(API_BASE, timeoutMs);
+  // If the configured backend is unreachable, try the local shared server —
+  // common when previewing through a tunnel URL with no hosted backend.
+  if (probe.reason === 'offline') return pingOnce(LOCAL_API_BASE, timeoutMs);
+  return probe;
+}
+
+async function pingOnce(base: string, timeoutMs: number): Promise<{ online: boolean; reason: 'ok' | 'auth' | 'offline' | 'error' }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
-    const res = await fetch(`${API_BASE}/admin/ping`, { headers, signal: controller.signal });
+    const res = await fetch(`${base}/admin/ping`, { headers, signal: controller.signal });
     if (res.status === 401) return { online: false, reason: 'auth' };
     if (res.status >= 200 && res.status < 300) return { online: true, reason: 'ok' };
     const offlineish = res.status === 404 || res.status === 405 || res.status >= 500;
@@ -427,6 +438,10 @@ export async function getAdminMessages(threadId: string) {
 
 export async function replyThread(threadId: string, text: string) {
   return adminFetch<{ ok: boolean; messages?: ChatMessageData[] }>(`/admin/threads/${threadId}/reply`, { method: 'POST', body: { text } });
+}
+
+export async function replyToAll(text: string) {
+  return adminFetch<{ ok: boolean; delivered: number }>(`/admin/threads/reply-all`, { method: 'POST', body: { text } });
 }
 
 export async function markAdminThreadRead(threadId: string) {

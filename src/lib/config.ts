@@ -24,8 +24,23 @@ export const GOOGLE_CLIENT_ID = '24300395823-ahbmo1pjkvnchlobe1gmf0em88mhmjgt.ap
  * Without a reachable backend the app falls back to per-browser storage, which
  * is why chats from other devices would not be visible.
  */
-const HOSTED_API_BASE = 'https://shieldsafebank-api.onrender.com';
+const HOSTED_API_BASE = 'https://shieldsafebank-api.onrender.com/api';
 const envBase = (import.meta.env?.VITE_API_BASE as string | undefined)?.replace(/\/$/, '');
 const isLocalHost = typeof window !== 'undefined'
   && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
 export const API_BASE = envBase || (isLocalHost ? '/api' : HOSTED_API_BASE);
+
+/**
+ * Fallback base URL for the local shared server (port 4000).
+ *
+ * When the app is opened through a preview / tunnel URL the config above picks
+ * the hosted backend, but if that is down or unreachable every request fails and
+ * the whole app silently degrades to per-browser localStorage. Per-browser
+ * storage is isolated between a normal window and an incognito window, which is
+ * why chats from one browser were invisible in the other.
+ *
+ * The API layer retries failed requests against this local base, so the shared
+ * server (chats, users, balances, admin console) keeps working even when the
+ * configured backend can't be reached.
+ */
+export const LOCAL_API_BASE = 'http://localhost:4000/api';

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
-import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, getAdminThreads, getAdminMessages, replyThread, markAdminThreadRead, verifyAdminUser, pingAdminServer, adminAuthExpired } from '../../lib/api';
+import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, verifyAdminUser, pingAdminServer, adminAuthExpired } from '../../lib/api';
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
 import BrandMark from '../../components/BrandMark';
@@ -60,6 +60,8 @@ export default function AdminConsole() {
   const [serverOnline, setServerOnline] = useState(true);
   const [authStale, setAuthStale] = useState(false);
   const [syncNow, setSyncNow] = useState(false);
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const [broadcastInput, setBroadcastInput] = useState('');
 
   // If the shared server is reachable but the stored admin token is stale, the
   // banner says RE-LOGIN (green fix: one click), never OFFLINE. Render free
@@ -197,6 +199,22 @@ export default function AdminConsole() {
     setMessages(await loadMessages(activeThread));
     await loadThreads();
     setChatInput('');
+  }
+
+  async function sendBroadcast() {
+    const text = broadcastInput.trim();
+    if (!text || threads.length === 0) return;
+    await replyToAll(text);
+    setBroadcastOpen(false);
+    setBroadcastInput('');
+    await loadThreads();
+    if (activeThread) {
+      setMessages(await loadMessages(activeThread));
+      markThreadRead(activeThread);
+    } else {
+      const first = await loadThreads();
+      if (first.length > 0) { setActiveThread(first[0].id); setMessages(await loadMessages(first[0].id)); }
+    }
   }
 
   function copyAddress(key: string, value: string) {
@@ -379,6 +397,33 @@ export default function AdminConsole() {
           <div className="admin-chat" style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 0, border: '1px solid #123C7C', height: '600px' }}>
             {/* Thread list */}
             <div style={{ borderRight: '1px solid #123C7C', overflowY: 'auto', background: '#0B2B5C' }}>
+              {/* Reply to everyone — broadcast one message to all conversations */}
+              <div style={{ padding: '8px 16px', borderBottom: '1px solid #123C7C', flexShrink: 0 }}>
+                {!broadcastOpen ? (
+                  <button
+                    onClick={() => { setBroadcastOpen(true); setBroadcastInput(''); }}
+                    disabled={threads.length === 0}
+                    style={{ width: '100%', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#EAB308', background: '#123C7C', border: '1px solid #123C7C', padding: '8px 12px', cursor: threads.length === 0 ? 'default' : 'pointer', letterSpacing: '0.04em' }}
+                  >
+                    {threads.length === 0 ? 'NO CONVERSATIONS' : 'REPLY TO ALL • ' + threads.filter(t => t.unread).length + ' UNREAD'}
+                  </button>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <textarea
+                      value={broadcastInput}
+                      onChange={e => setBroadcastInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBroadcast(); } }}
+                      placeholder="Message to everyone…"
+                      rows={2}
+                      style={{ width: '100%', background: '#0A2044', border: '1px solid #123C7C', padding: '8px 10px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#E5E7EB', outline: 'none', resize: 'vertical' }}
+                    />
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button onClick={sendBroadcast} style={{ flex: 1, fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: '#4779C4', border: 'none', padding: '6px 12px', cursor: 'pointer' }}>BROADCAST</button>
+                      <button onClick={() => { setBroadcastOpen(false); setBroadcastInput(''); }} style={{ flex: 1, fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#6B7280', background: '#123C7C', border: '1px solid #123C7C', padding: '6px 12px', cursor: 'pointer' }}>CANCEL</button>
+                    </div>
+                  </div>
+                )}
+              </div>
               {threads.length === 0 ? (
                 <div style={{ padding: '40px 20px', textAlign: 'center', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#374151' }}>No chats yet. Messages from the app will appear here.</div>
               ) : threads.map(thread => (
