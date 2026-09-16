@@ -384,6 +384,11 @@ export async function markMyChatRead() {
   return apiFetch('/chat/read', { method: 'POST' });
 }
 
+/** Presence for the customer chat header: is an agent at the console now? */
+export async function getChatPresence() {
+  return apiFetch<{ ok: boolean; agents: number; agentOnline: boolean; time: string }>('/chat/presence');
+}
+
 /**
  * The admin session lives in localStorage, not sessionStorage.
  *

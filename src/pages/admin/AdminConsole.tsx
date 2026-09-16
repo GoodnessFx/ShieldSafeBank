@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
 import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken } from '../../lib/api';
@@ -47,6 +47,7 @@ export default function AdminConsole() {
   const [tab, setTab] = useState<Tab>('chat');
   const [activeThread, setActiveThread] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState('');
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [threads, setThreads] = useState<AdminThread[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [users, setUsers] = useState<AdminUserRow[]>([]);
@@ -207,13 +208,17 @@ export default function AdminConsole() {
   async function sendReply() {
     const text = chatInput.trim();
     if (!text || !activeThread) return;
-    const thread = threads.find(t => t.id === activeThread) || getThreads().find(t => t.id === activeThread);
-    await replyThread(activeThread, text);
-    pushChatMessage(activeThread, thread ? thread.user : 'Customer', thread ? thread.email : '', text, 'admin');
-    markThreadRead(activeThread);
-    setMessages(await loadMessages(activeThread));
-    await loadThreads();
+    const id = activeThread;
+    const thread = threads.find(t => t.id === id) || getThreads().find(t => t.id === id);
+    const stamp = new Date().toISOString();
     setChatInput('');
+    // WhatsApp habit: your reply appears immediately, then the server copy replaces it.
+    setMessages(prev => [...prev, { id: `admin${Date.now()}`, from: 'admin', text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), at: stamp }]);
+    await replyThread(id, text);
+    pushChatMessage(id, thread ? thread.user : 'Customer', thread ? thread.email : '', text, 'admin');
+    markThreadRead(id);
+    setMessages(await loadMessages(id));
+    await loadThreads();
   }
 
   async function sendBroadcast() {
@@ -323,6 +328,11 @@ export default function AdminConsole() {
     return () => { closeChatStream(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasAdminToken(), activeThread]);
+
+  // WhatsApp habit: the open conversation always sits at the newest message.
+  useEffect(() => {
+    if (chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+  }, [messages, activeThread]);
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'chat', label: 'Chat Inbox' },
@@ -502,11 +512,11 @@ export default function AdminConsole() {
 
             {/* Thread view */}
             <div style={{ display: 'flex', flexDirection: 'column', background: '#0A2044' }}>
-              <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div ref={chatScrollRef} style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {!activeThread ? (
                   <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#374151', textAlign: 'center', marginTop: '40px' }}>Select a conversation to reply.</p>
                 ) : messages.map((m, i) => (
-                  <div key={i} style={{ display: 'flex', flexDirection: m.from === 'admin' ? 'row-reverse' : 'row', gap: '10px', alignItems: 'flex-end' }}>
+                  <div key={m.id || i} style={{ display: 'flex', flexDirection: m.from === 'admin' ? 'row-reverse' : 'row', gap: '10px', alignItems: 'flex-end' }}>
                     <div style={{ maxWidth: '72%', background: m.from === 'admin' ? '#123C7C' : '#0B2B5C', border: '1px solid #123C7C', padding: '10px 14px' }}>
                       <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#E5E7EB', margin: '0 0 4px', lineHeight: 1.5 }}>{m.text}</p>
                       <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#6B7280', margin: 0, textAlign: m.from === 'admin' ? 'right' : 'left' }}>{fmtShortTime(m.at) || m.time}</p>

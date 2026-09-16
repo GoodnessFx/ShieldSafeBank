@@ -23,21 +23,22 @@ If `DATABASE_URL` is not set, the server still falls back to a local
 `server/data/store.json` file (or `DATA_DIR/store.json`) so local development
 works without Postgres.
 
-### Chat auto-acknowledgement
+### Chat
 
-Customers can send unlimited chat messages — nothing closes the input after the
-first one. Once a thread has been quiet for `AUTO_REPLY_DELAY_MS` (default
-`60000`, i.e. one minute) and the customer still has the last word, the server
-appends a single automated note, "Thanks for your message — an agent will get to
-you soon.", which the customer sees in the thread and which also appears in the
-admin Chat Inbox. Sending another message simply restarts the timer, the note
-never repeats while the customer stays quiet, and a real admin reply (or
-**Reply to All**) cancels it. Override the delay on the API service when you want
-a longer or shorter wait:
+Chatting works like a normal chat app: customers and admins can exchange as
+many messages as they like, whenever they like — nothing closes either side's
+input, and there are no timers, countdowns or automated replies.
 
-```
-AUTO_REPLY_DELAY_MS=120000
-```
+* Every message is appended to the thread and persisted in Postgres (or the
+  local file store without `DATABASE_URL`), so both sides see the complete
+  history whenever they come back.
+* While an admin console holds its chat stream open, the widget header shows a
+  green **Agent online** dot. When nobody is connected the dot turns grey outside
+  the advertised hours (Mon–Fri, 9am–6pm New York time); the empty chat still
+  shows those hours. The dot is honest — it is not always on.
+* Presence is a public endpoint that only exposes a count, so the widget can
+  check it before chatting: `GET /api/chat/presence` →
+  `{ ok: true, agents: <number>, agentOnline: <boolean> }`.
 
 ## 1b. Supabase Postgres (`DATABASE_URL`)
 

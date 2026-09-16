@@ -1,15 +1,34 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router';
 import { chatIdentity, pushChatMessage, getThreadMessages, markThreadRead, type ChatMessage } from '../lib/localStore';
-import { getMyChatThread, sendChatMessage, markMyChatRead } from '../lib/api';
+import { getMyChatThread, sendChatMessage, markMyChatRead, getChatPresence } from '../lib/api';
 import { subscribeToChat, closeChatStream, type ChatEvent } from '../lib/chatTransport';
+
+/** Quick-pick emojis for the composer — typing them directly works too. */
+const CHAT_EMOJIS = ['😀','😊','😂','🥰','😍','😎','😌','😅','🤣','👍','👏','👋','👌','🫶','💯','✅','🔥','🎉','❤️','💰','🏦','📲','⏰','🙋'];
+
+/** Mon–Fri, 9am–6pm in New York — the hours the widget advertises. */
+function withinSupportHours(): boolean {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', hour12: false }).formatToParts(new Date());
+    const day = parts.find(p => p.type === 'weekday')?.value || '';
+    const hour = Number(parts.find(p => p.type === 'hour')?.value || '0');
+    return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(day) && hour >= 9 && hour < 18;
+  } catch {
+    return false;
+  }
+}
 
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [unreadBadge, setUnreadBadge] = useState(false);
+  const [agentsConnected, setAgentsConnected] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const openRef = useRef(false);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   // Customers may send as many messages as they like, one after another, so
   // several requests can be in flight at once. Each send takes a ticket and only
   // the newest response is allowed to replace the list — an older one would be
@@ -19,6 +38,9 @@ export default function ChatWidget() {
   const identity = chatIdentity();
   const signedIn = !!identity.email;
   const seenKey = `ssb_chat_seen_${(identity.email || '').toLowerCase()}`;
+  // Green while an agent's console is actually connected, or during the hours
+  // the widget advertises. The dot is honest: it is not always on.
+  const agentOnline = agentsConnected || withinSupportHours();
 
   function applyMessages(list: ChatMessage[]) {
     const normalized = list.map((m, i) => ({ ...m, id: m.id || `local${i}` }));
@@ -54,21 +76,56 @@ export default function ChatWidget() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedIn]);
 
+  // "Agent online" dot: checks whether an admin console holds the realtime
+  // stream open. Refreshed every 20s; nothing here counts down anything the
+  // customer would feel — it only updates the dot in the header.
+  useEffect(() => {
+    if (!signedIn) return;
+    const check = () => {
+      getChatPresence()
+        .then(r => { if (r.ok && r.data) setAgentsConnected(!!r.data.agentOnline); })
+        .catch(() => null);
+    };
+    check();
+    const id = setInterval(check, 20000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedIn]);
+
+  // WhatsApp habit: the view always sits at the newest message.
+  useEffect(() => {
+    if (open && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [messages, open]);
+
   // Messages live on the shared server (so they reach the admin on any device);
   // if the server is offline we fall back to the browser's local copy.
   //
-  // Recovery: a message written while no backend was reachable only ever existed
-  // in that browser. When the server IS reachable we upload anything the server
-  // is missing, so messages like that are never lost.
-  function messageKey(m: { text: string; time?: string; at?: string }) {
-    return `${m.at || m.time || ''}|${m.text}`;
+  // The conversation is never hidden and never starts over: the history the
+  // server holds is shown together with anything this browser sent while the
+  // backend was unreachable (matched on text, since a message that made it to
+  // the server gets the server's timestamp). Coming back later always shows
+  // the whole thread.
+  function messageKey(m: { text: string }) {
+    return m.text;
   }
 
+  /** Everything the server knows, plus this browser's messages the server is
+   * still missing — never duplicated. */
+  function mergeHistory(serverMsgs: ChatMessage[], localMsgs: ChatMessage[]): ChatMessage[] {
+    const known = new Set(serverMsgs.map(messageKey));
+    const extras = localMsgs.filter(m => !known.has(messageKey(m)));
+    return [...serverMsgs, ...extras];
+  }
+
+  // Recovery: a message written while no backend was reachable only ever existed
+  // in that browser. When the server IS reachable we upload anything the server
+  // is missing (matched on text, so the same words are never uploaded twice),
+  // so messages like that are never lost.
   function syncLocalToServer(who: { id: string; user: string; email: string }, serverMsgs: ChatMessage[]): boolean {
     const localMsgs = getThreadMessages(who.id);
     if (localMsgs.length === 0) return false;
-    const serverKeys = new Set(serverMsgs.map(messageKey));
-    const missing = localMsgs.filter(m => !serverKeys.has(messageKey(m)));
+    const known = new Set(serverMsgs.map(messageKey));
+    const missing = localMsgs.filter(m => !known.has(messageKey(m)));
     for (const m of missing) sendChatMessage(m.text).catch(() => null);
     return missing.length > 0;
   }
@@ -79,11 +136,13 @@ export default function ChatWidget() {
     try {
       const r = await getMyChatThread();
       if (r.ok && r.data) {
+        // Upload what the server is missing, then show the merged thread so a
+        // message can never vanish from view while it is still only local.
         if (syncLocalToServer(who, r.data.messages)) {
           const again = await getMyChatThread();
-          if (again.ok && again.data) { applyMessages(again.data.messages); return; }
+          if (again.ok && again.data) { applyMessages(mergeHistory(again.data.messages, getThreadMessages(who.id))); return; }
         }
-        applyMessages(r.data.messages);
+        applyMessages(mergeHistory(r.data.messages, getThreadMessages(who.id)));
         return;
       }
     } catch { /* fall back below */ }
@@ -120,8 +179,8 @@ export default function ChatWidget() {
     if (text.length > 2000) return;
     // Optimistic append: the customer sees their own message instantly, and the
     // input is cleared so they can immediately type the next one. Nothing here
-    // blocks further messages — the server acknowledges a quiet thread with
-    // "an agent will get to you soon" instead of closing the conversation.
+    // blocks further messages — the conversation simply keeps every message
+    // until the server confirms it.
     const tempId = `pending${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
     setMessages(prev => [...prev, { id: tempId, from: 'user', text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), at: new Date().toISOString() }]);
     setInput('');
@@ -131,8 +190,9 @@ export default function ChatWidget() {
       .then(r => {
         if (r.ok && r.data && r.data.messages) {
           // Only the newest response may replace the list: an older one would be
-          // missing the messages sent after it.
-          if (isNewest()) applyMessages(r.data.messages as ChatMessage[]);
+          // missing the messages sent after it. Merge against this browser's
+          // copy so nothing the customer wrote can flash out of view.
+          if (isNewest()) applyMessages(mergeHistory(r.data.messages as ChatMessage[], getThreadMessages(who.id)));
           return;
         }
         // Server rejected or unreachable: the message still exists in this
@@ -154,7 +214,10 @@ export default function ChatWidget() {
           <div style={{ background: '#123C7C', padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <p style={{ margin: 0, fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '14px', color: '#fff' }}>Shield Safe Bank</p>
-              <p style={{ margin: 0, fontSize: '12px', color: '#A9C6E8' }}>Support</p>
+              <p style={{ margin: 0, fontSize: '12px', color: '#A9C6E8', display: 'flex', alignItems: 'center', gap: '6px' }} title={agentOnline ? 'An agent is at the console right now' : 'Leave a message and we will reply'}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: agentOnline ? '#22C55E' : '#9CA3AF', boxShadow: agentOnline ? '0 0 0 2px rgba(34,197,94,0.25)' : 'none', flexShrink: 0 }} aria-hidden="true" />
+                {agentOnline ? 'Agent online' : 'Support — we reply as soon as we can'}
+              </p>
             </div>
             <button onClick={closeChat} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: '4px', fontSize: '18px', lineHeight: 1 }} aria-label="Close chat">&#x2715;</button>
           </div>
@@ -167,7 +230,7 @@ export default function ChatWidget() {
           ) : (
             <>
           {/* Messages */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '260px' }}>
+          <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '260px' }}>
             {messages.length === 0 ? (
               <div style={{ padding: '8px 12px', background: '#F4F6F8', color: '#0A2044', fontSize: '13px', lineHeight: 1.5, maxWidth: '80%' }}>
                 Talk to a real person. We're available Monday to Friday, 9am to 6pm EST.
@@ -187,20 +250,30 @@ export default function ChatWidget() {
             ))}
           </div>
 
-          {/* Always available: customers may send as many messages as they like,
-              and the automated "an agent will get to you soon" note arrives in
-              the thread after a minute of silence without closing the input. */}
-          <div style={{ borderTop: '1px solid #DCE3EA', padding: '10px', display: 'flex', gap: '8px' }}>
+          {/* The composer is always available: a customer can send as many
+              messages as they like, in any order, and nothing ever times out. */}
+          <div style={{ borderTop: '1px solid #DCE3EA', padding: '10px', display: 'flex', gap: '8px', position: 'relative' }}>
+            {emojiOpen && (
+              <div style={{ position: 'absolute', bottom: '100%', left: '10px', marginBottom: '6px', background: '#fff', border: '1px solid #DCE3EA', boxShadow: '0 4px 16px rgba(10,32,68,0.12)', padding: '8px', display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: '3px', zIndex: 3 }} role="dialog" aria-label="Choose an emoji">
+                {CHAT_EMOJIS.map(e => (
+                  <button key={e} onClick={() => { setInput(prev => prev + e); setEmojiOpen(false); inputRef.current?.focus(); }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '17px', lineHeight: 1, padding: '3px' }} aria-label={`Insert ${e}`}>{e}</button>
+                ))}
+              </div>
+            )}
+            <button onClick={() => setEmojiOpen(o => !o)} aria-label="Insert emoji" aria-expanded={emojiOpen}
+              style={{ background: 'none', border: '1px solid #DCE3EA', cursor: 'pointer', fontSize: '16px', lineHeight: 1, padding: '4px 8px', color: '#0A2044', flexShrink: 0 }}>😊</button>
             <input
+              ref={inputRef}
               value={input}
               onChange={e => setInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') send(); }}
+              onKeyDown={e => { if (e.key === 'Enter') { setEmojiOpen(false); send(); } }}
               maxLength={2000}
               placeholder="Type a message..."
-              style={{ flex: 1, border: '1px solid #DCE3EA', padding: '8px 10px', fontSize: '13px', color: '#0A2044', background: '#fff', outline: 'none' }}
+              style={{ flex: 1, minWidth: 0, border: '1px solid #DCE3EA', padding: '8px 10px', fontSize: '13px', color: '#0A2044', background: '#fff', outline: 'none' }}
               aria-label="Chat message"
             />
-            <button onClick={send} style={{ background: '#123C7C', color: '#fff', border: 'none', padding: '8px 14px', cursor: 'pointer', fontWeight: 500, fontSize: '13px' }}>Send</button>
+            <button onClick={() => { setEmojiOpen(false); send(); }} style={{ background: '#123C7C', color: '#fff', border: 'none', padding: '8px 14px', cursor: 'pointer', fontWeight: 500, fontSize: '13px', flexShrink: 0 }}>Send</button>
           </div>
             </>
           )}
