@@ -42,6 +42,9 @@ function parseServerBalance(value: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Quick-pick emojis for the admin composer — typing them directly works too. */
+const CHAT_EMOJIS = ['😀','😊','😂','🥰','😍','😎','😌','😅','🤣','👍','👏','👋','👌','🫶','💯','✅','🔥','🎉','❤️','💰','🏦','📲','⏰','🙋'];
+
 export default function AdminConsole() {
   const nav = useNavigate();
   const [tab, setTab] = useState<Tab>('chat');
@@ -69,6 +72,8 @@ export default function AdminConsole() {
   const [syncNow, setSyncNow] = useState(false);
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [broadcastInput, setBroadcastInput] = useState('');
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const chatInputRef = useRef<HTMLInputElement | null>(null);
 
   // If the shared server is reachable but the stored admin token is stale, the
   // banner says RE-LOGIN (green fix: one click), never OFFLINE. Render free
@@ -208,6 +213,7 @@ export default function AdminConsole() {
   async function sendReply() {
     const text = chatInput.trim();
     if (!text || !activeThread) return;
+    setEmojiOpen(false);
     const id = activeThread;
     const thread = threads.find(t => t.id === id) || getThreads().find(t => t.id === id);
     const stamp = new Date().toISOString();
@@ -511,24 +517,34 @@ export default function AdminConsole() {
             </div>
 
             {/* Thread view */}
-            <div style={{ display: 'flex', flexDirection: 'column', background: '#0A2044' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', background: '#fff' }}>
               <div ref={chatScrollRef} style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {!activeThread ? (
-                  <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#374151', textAlign: 'center', marginTop: '40px' }}>Select a conversation to reply.</p>
+                  <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', textAlign: 'center', marginTop: '40px' }}>Select a conversation to reply.</p>
                 ) : messages.map((m, i) => (
                   <div key={m.id || i} style={{ display: 'flex', flexDirection: m.from === 'admin' ? 'row-reverse' : 'row', gap: '10px', alignItems: 'flex-end' }}>
-                    <div style={{ maxWidth: '72%', background: m.from === 'admin' ? '#123C7C' : '#0B2B5C', border: '1px solid #123C7C', padding: '10px 14px' }}>
-                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#E5E7EB', margin: '0 0 4px', lineHeight: 1.5 }}>{m.text}</p>
-                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#6B7280', margin: 0, textAlign: m.from === 'admin' ? 'right' : 'left' }}>{fmtShortTime(m.at) || m.time}</p>
+                    <div style={{ maxWidth: '72%', background: m.from === 'admin' ? '#123C7C' : '#F4F6F8', color: m.from === 'admin' ? '#fff' : '#0A2044', borderRadius: '10px', padding: '10px 14px' }}>
+                      <p style={{ fontFamily: 'Sora, sans-serif', fontSize: '13px', margin: '0 0 4px', lineHeight: 1.5 }}>{m.text}</p>
+                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#9CA3AF', margin: 0, textAlign: m.from === 'admin' ? 'right' : 'left' }}>{fmtShortTime(m.at) || m.time}</p>
                     </div>
                   </div>
                 ))}
               </div>
-              <div style={{ borderTop: '1px solid #123C7C', padding: '12px 16px', display: 'flex', gap: '10px' }}>
-                <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendReply()}
+              <div style={{ borderTop: '1px solid #DCE3EA', padding: '12px 16px', display: 'flex', gap: '10px', position: 'relative' }}>
+                {emojiOpen && (
+                  <div style={{ position: 'absolute', bottom: '100%', left: '10px', marginBottom: '6px', background: '#fff', border: '1px solid #DCE3EA', boxShadow: '0 4px 16px rgba(10,32,68,0.12)', padding: '8px', display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: '3px', zIndex: 3 }} role="dialog" aria-label="Choose an emoji">
+                    {CHAT_EMOJIS.map(e => (
+                      <button key={e} onClick={() => { setChatInput(prev => prev + e); setEmojiOpen(false); chatInputRef.current?.focus(); }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '17px', lineHeight: 1, padding: '3px' }} aria-label={`Insert ${e}`}>{e}</button>
+                    ))}
+                  </div>
+                )}
+                <button onClick={() => setEmojiOpen(o => !o)} aria-label="Insert emoji" aria-expanded={emojiOpen}
+                  style={{ background: 'none', border: '1px solid #DCE3EA', cursor: 'pointer', fontSize: '16px', lineHeight: 1, padding: '4px 8px', color: '#0A2044', flexShrink: 0 }}>😊</button>
+                <input ref={chatInputRef} value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { setEmojiOpen(false); sendReply(); } }}
                   placeholder="Type a reply…"
-                  style={{ flex: 1, background: '#0B2B5C', border: '1px solid #123C7C', padding: '9px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#E5E7EB', outline: 'none' }} />
-                <button onClick={sendReply} style={{ background: '#4779C4', color: '#fff', border: 'none', padding: '9px 18px', fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '12px', cursor: 'pointer', letterSpacing: '0.04em' }}>SEND</button>
+                  style={{ flex: 1, background: '#fff', border: '1px solid #DCE3EA', padding: '9px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#0A2044', outline: 'none' }} />
+                <button onClick={sendReply} style={{ background: '#123C7C', color: '#fff', border: 'none', padding: '9px 18px', fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '12px', cursor: 'pointer', letterSpacing: '0.04em' }}>SEND</button>
               </div>
             </div>
           </div>
