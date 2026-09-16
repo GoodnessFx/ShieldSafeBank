@@ -53,11 +53,21 @@ function saveLocalSession(email: string, name: string, type: string) {
   setToken('local');
 }
 
+type PingReason = 'ok' | 'auth' | 'no-session' | 'offline' | 'error';
+
+/** Abort a request after this long so a sleeping backend cannot wedge the UI. */
+const REQUEST_TIMEOUT_MS = 15000;
+
 async function tryFetch<T>(
   base: string, path: string, authToken: string | null,
   onAuthFail: () => void,
   opts?: { method?: string; body?: unknown },
 ): Promise<ApiResult<T>> {
+  // A cold or sleeping backend can hang for a long time. Without a timeout those
+  // requests queue up behind the console's polling and make a healthy panel look
+  // dead, so abort and let the caller fall through to the other base.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
@@ -65,6 +75,7 @@ async function tryFetch<T>(
       method: opts?.method || 'GET',
       headers,
       body: opts?.body ? JSON.stringify(opts.body) : undefined,
+      signal: controller.signal,
     });
     if (res.status === 401) {
       if (authToken !== 'local') onAuthFail();
@@ -78,6 +89,8 @@ async function tryFetch<T>(
     return { data: json as T, ok: true, offline: false };
   } catch {
     return { data: null, ok: false, offline: true };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -316,50 +329,141 @@ export async function markMyChatRead() {
   return apiFetch('/chat/read', { method: 'POST' });
 }
 
-let adminToken = sessionStorage.getItem('ssb_admin_token') || '';
-
 /**
- * Why the local fallback silently hijacks one healthy browser while working on
- * others: a browser untouched for 15+ min holds an admin token issued before
- * the free-tier host last restarted, so getAdminUsers dies with 401 "you are
- * not logged in". The admin is genuinely awake on the shared server — only
- * their local ticket is stale. Return the failure honestly so the console can
- * say "re-login", not "offline".
+ * The admin session lives in localStorage, not sessionStorage.
+ *
+ * sessionStorage is per-tab and vanishes when the tab closes, so every new tab,
+ * new window or preview reload signed the admin out. localStorage keeps the
+ * session until the token is genuinely rejected or the admin logs out.
  */
-export function adminAuthExpired(): boolean {
-  return !adminToken && sessionStorage.getItem('ssb_admin') === '1';
+const ADMIN_TOKEN_KEY = 'ssb_admin_token';
+const ADMIN_FLAG_KEY = 'ssb_admin';
+const ADMIN_BASE_KEY = 'ssb_admin_base';
+
+/** Moves a token left behind by the older sessionStorage implementation. */
+function migrateAdminStorage() {
+  try {
+    const legacy = sessionStorage.getItem(ADMIN_TOKEN_KEY);
+    if (legacy && !localStorage.getItem(ADMIN_TOKEN_KEY)) {
+      localStorage.setItem(ADMIN_TOKEN_KEY, legacy);
+      localStorage.setItem(ADMIN_FLAG_KEY, '1');
+    }
+    sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+    sessionStorage.removeItem(ADMIN_FLAG_KEY);
+  } catch { /* storage unavailable */ }
 }
 
-function setAdminToken(t: string) {
-  adminToken = t;
-  sessionStorage.setItem('ssb_admin_token', t);
-  sessionStorage.setItem('ssb_admin', '1');
+function storedAdminValue(key: string): string {
+  try { return localStorage.getItem(key) || ''; } catch { return ''; }
+}
+
+migrateAdminStorage();
+
+let adminToken = storedAdminValue(ADMIN_TOKEN_KEY);
+// Which backend issued the current token. A token minted by the local server is
+// meaningless to the hosted one (and the reverse), so remembering the issuer
+// stops a 401 from the *other* backend being mistaken for an expired session.
+let adminBase = storedAdminValue(ADMIN_BASE_KEY);
+
+/** The base that issued the current token, or the configured default. */
+function adminPreferredBase(): string {
+  return adminBase === LOCAL_API_BASE ? LOCAL_API_BASE : API_BASE;
+}
+
+/** The other configured base, tried when the preferred one is unreachable. */
+function adminOtherBase(): string {
+  return adminPreferredBase() === API_BASE ? LOCAL_API_BASE : API_BASE;
+}
+
+export function adminAuthExpired(): boolean {
+  return !adminToken && storedAdminValue(ADMIN_FLAG_KEY) === '1';
+}
+
+/** True while a usable admin token is held. */
+export function hasAdminToken(): boolean {
+  return !!adminToken;
+}
+
+function setAdminToken(token: string, base: string) {
+  adminToken = token;
+  adminBase = base;
+  try {
+    localStorage.setItem(ADMIN_TOKEN_KEY, token);
+    localStorage.setItem(ADMIN_BASE_KEY, base);
+    localStorage.setItem(ADMIN_FLAG_KEY, '1');
+  } catch { /* storage unavailable */ }
 }
 
 function clearAdminToken() {
   adminToken = '';
-  sessionStorage.removeItem('ssb_admin_token');
-  sessionStorage.removeItem('ssb_admin');
+  adminBase = '';
+  try {
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+    localStorage.removeItem(ADMIN_BASE_KEY);
+    localStorage.removeItem(ADMIN_FLAG_KEY);
+  } catch { /* storage unavailable */ }
 }
 
+/** Signs the admin out for real: token, issuing base and flag together. */
+export function adminLogout() {
+  clearAdminToken();
+}
+
+/** Records that the admin reached the console while no backend was answering. */
+export function markAdminSignedIn() {
+  try { localStorage.setItem(ADMIN_FLAG_KEY, '1'); } catch { /* storage unavailable */ }
+}
+
+// The base that answered the most recent admin request, so a fresh login records
+// where its token came from.
+let lastAdminBase = '';
+
 async function adminFetch<T>(path: string, opts?: { method?: string; body?: unknown }): Promise<ApiResult<T>> {
-  const r = await tryFetch<T>(API_BASE, path, adminToken, clearAdminToken, opts);
-  if (r.ok) return r;
-  if (!r.offline) return r;
-  // Primary backend unreachable — retry against the local shared server so the
-  // admin console keeps working (same chats, users, balances as every browser).
-  return tryFetch<T>(LOCAL_API_BASE, path, adminToken, clearAdminToken, opts);
+  // Always talk to the base that issued the token first.
+  const preferred = adminPreferredBase();
+  const other = adminOtherBase();
+
+  // A 401 by itself is not proof the token died: it may simply be the *other*
+  // backend, which never issued this token and therefore cannot judge it. Only
+  // clear the session after BOTH backends had a chance to answer.
+  let authFailures = 0;
+  const onAuthFail = () => { authFailures += 1; };
+
+  const first = await tryFetch<T>(preferred, path, adminToken, onAuthFail, opts);
+  if (first.ok) { lastAdminBase = preferred; return first; }
+  if (!first.offline) {
+    const second = await tryFetch<T>(other, path, adminToken, onAuthFail, opts);
+    if (second.ok) {
+      // The other backend accepted the token, so adopt it as the issuer. This
+      // is what stops the session flapping when both backends are reachable.
+      if (adminBase && other !== adminBase) setAdminToken(adminToken, other);
+      lastAdminBase = other;
+      return second;
+    }
+    // Both backends answered and neither accepted the token: it is dead.
+    if (authFailures > 0) clearAdminToken();
+    else lastAdminBase = preferred;
+    return second;
+  }
+
+  // Preferred base never answered (sleeping/down): try the other backend.
+  const second = await tryFetch<T>(other, path, adminToken, onAuthFail, opts);
+  if (second.ok || !second.offline) {
+    if (second.ok && adminBase && other !== adminBase) setAdminToken(adminToken, other);
+    lastAdminBase = other;
+  }
+  return second;
 }
 
 export async function adminLogin(email: string, password: string, totp = ''): Promise<ApiResult<AdminLoginResult>> {
   const r = await adminFetch<{ token: string }>('/admin/login', { method: 'POST', body: { email, password, totp } });
-  if (r.ok && r.data?.token) setAdminToken(r.data.token);
+  if (r.ok && r.data?.token) setAdminToken(r.data.token, lastAdminBase || API_BASE);
   if (!r.ok && r.offline) {
-    if (email === 'admin@shieldsafebank.com' && password === 'admin1234') {
-      setAdminToken('local-admin');
-      return { data: { token: 'local-admin' }, ok: true, offline: true };
-    }
-    return { data: { error: 'Invalid admin credentials.' }, ok: false, offline: false };
+    // No backend answered. Let the admin into the console in offline mode (it can
+    // still show this browser's data) but do NOT invent a token: a made-up token
+    // is rejected on every later call and caused the endless re-login loop.
+    markAdminSignedIn();
+    return { data: { token: '' }, ok: true, offline: true };
   }
   return r;
 }
@@ -371,22 +475,23 @@ export async function getAdminUsers() {
 // Authenticated liveness probe for the deployed console. Unlike the public
 // /api/health check it carries the admin token, so a 401 (expired token)
 // resolves honestly as a sign-in problem rather than as "the server is down".
-export async function pingAdminServer(timeoutMs = 20000): Promise<{ online: boolean; reason: 'ok' | 'auth' | 'offline' | 'error' }> {
-  const probe = await pingOnce(API_BASE, timeoutMs);
+export async function pingAdminServer(timeoutMs = 20000): Promise<{ online: boolean; reason: PingReason }> {
+  const probe = await pingOnce(adminPreferredBase(), timeoutMs);
   // If the configured backend is unreachable, try the local shared server —
   // common when previewing through a tunnel URL with no hosted backend.
-  if (probe.reason === 'offline') return pingOnce(LOCAL_API_BASE, timeoutMs);
+  if (probe.reason === 'offline') return pingOnce(adminOtherBase(), timeoutMs);
   return probe;
 }
 
-async function pingOnce(base: string, timeoutMs: number): Promise<{ online: boolean; reason: 'ok' | 'auth' | 'offline' | 'error' }> {
+async function pingOnce(base: string, timeoutMs: number): Promise<{ online: boolean; reason: PingReason }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
     const res = await fetch(`${base}/admin/ping`, { headers, signal: controller.signal });
-    if (res.status === 401) return { online: false, reason: 'auth' };
+    // A 401 when we sent no token just means nobody is signed in yet.
+    if (res.status === 401) return { online: false, reason: adminToken ? 'auth' : 'no-session' };
     if (res.status >= 200 && res.status < 300) return { online: true, reason: 'ok' };
     const offlineish = res.status === 404 || res.status === 405 || res.status >= 500;
     return { online: false, reason: offlineish ? 'offline' : 'error' };

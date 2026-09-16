@@ -4,7 +4,7 @@ import { adminLogin } from '../../lib/api';
 import BrandMark from '../../components/BrandMark';
 
 export default function AdminLogin() {
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState('admin@shieldsafebank.com');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -16,7 +16,6 @@ export default function AdminLogin() {
     setLoading(true);
     adminLogin(email, password).then(r => {
       if (!r.ok) { setLoading(false); setError(r.data && r.data.error ? r.data.error : 'Invalid admin credentials.'); return; }
-      sessionStorage.setItem('ssb_admin', '1');
       setLoading(false);
       nav('/xk9-admin-console-7f3a/console');
     });

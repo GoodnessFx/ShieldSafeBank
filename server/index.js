@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -132,8 +132,47 @@ function saveDB(db) {
   writeFileSync(DATA_PATH, JSON.stringify(db, null, 2));
 }
 
-function newToken() {
-  return randomBytes(32).toString('hex');
+/**
+ * Sessions are signed, not stored.
+ *
+ * The previous design kept live tokens in an in-memory Map, so every process
+ * restart silently invalidated every admin and customer session. The free-tier
+ * host restarts often (and resets its ephemeral data file), which is exactly why
+ * the admin console kept demanding a fresh sign-in even though the server was up.
+ *
+ * Tokens are now a keyed HMAC - of the user id, or of the fixed `admin` scope -
+ * so they stay valid across restarts and redeploys with no server-side state.
+ *
+ * Demo caveat: the key is a constant in an app whose admin credentials are
+ * already public (admin@shieldsafebank.com / admin1234). A real deployment should
+ * read SESSION_SECRET from the environment and rotate it.
+ */
+const SESSION_SECRET = process.env.SESSION_SECRET || 'shieldsafebank-demo-session-key-v1';
+
+function sign(scope) {
+  return createHmac('sha256', SESSION_SECRET).update(scope).digest('hex');
+}
+
+/** Stable bearer token for the single demo admin account. */
+function adminToken() {
+  return sign('admin');
+}
+
+/** Bearer token that carries the user id, so it needs no server-side lookup. */
+function userToken(userId) {
+  return `${userId}.${sign('user:' + userId)}`;
+}
+
+/** Returns the user id a token was issued for, or null when it is not authentic. */
+function userIdFromToken(token) {
+  const value = String(token || '');
+  const dot = value.indexOf('.');
+  if (dot <= 0) return null;
+  const id = value.slice(0, dot);
+  const given = Buffer.from(value.slice(dot + 1));
+  const expected = Buffer.from(sign('user:' + id));
+  if (given.length !== expected.length) return null;
+  return timingSafeEqual(given, expected) ? id : null;
 }
 
 function nextId(db, type) {
@@ -160,13 +199,11 @@ app.get('/api/admin/ping', adminMiddleware, (_, res) => {
 });
 
 let db = loadDB();
-const tokens = new Map();
-const adminTokens = new Map();
 
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) return res.status(401).json({ error:'Missing token' });
-  const userId = tokens.get(header.slice(7));
+  const userId = userIdFromToken(header.slice(7));
   if (!userId) return res.status(401).json({ error:'Invalid token' });
   req.user = db.users.find(u => u.id === userId);
   if (!req.user) return res.status(401).json({ error:'User not found' });
@@ -176,7 +213,11 @@ function authMiddleware(req, res, next) {
 function adminMiddleware(req, res, next) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) return res.status(401).json({ error:'Missing token' });
-  if (!adminTokens.has(header.slice(7))) return res.status(401).json({ error:'Invalid admin token' });
+  const given = Buffer.from(String(header.slice(7)));
+  const expected = Buffer.from(adminToken());
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
+    return res.status(401).json({ error:'Invalid admin token' });
+  }
   next();
 }
 
@@ -196,8 +237,7 @@ app.post('/api/auth/register', (req, res) => {
   };
   db.users.push(user);
   saveDB(db);
-  const token = newToken();
-  tokens.set(token, user.id);
+  const token = userToken(user.id);
   res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
 });
 
@@ -208,8 +248,7 @@ app.post('/api/auth/login', (req, res) => {
   if (!user) return res.status(401).json({ error:'Invalid credentials.' });
   if (user.password !== password) return res.status(401).json({ error:'Invalid credentials.' });
   if (user.status === 'suspended') return res.status(403).json({ error:'Account is suspended.' });
-  const token = newToken();
-  tokens.set(token, user.id);
+  const token = userToken(user.id);
   user.lastLogin = new Date().toISOString();
   saveDB(db);
   res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
@@ -252,8 +291,7 @@ app.post('/api/auth/google', async (req, res) => {
     user.lastLogin = new Date().toISOString();
     saveDB(db);
   }
-  const token = newToken();
-  tokens.set(token, user.id);
+  const token = userToken(user.id);
   res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
 });
 
@@ -492,8 +530,7 @@ app.post('/api/admin/users/:id/verify', adminMiddleware, (req, res) => {
 app.post('/api/admin/login', (req, res) => {
   const { email, password } = req.body;
   if (email === 'admin@shieldsafebank.com' && password === 'admin1234') {
-    const token = newToken();
-    adminTokens.set(token, true);
+    const token = adminToken();
     return res.json({ token });
   }
   res.status(401).json({ error:'Invalid admin credentials.' });

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
-import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, verifyAdminUser, pingAdminServer, adminAuthExpired } from '../../lib/api';
+import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired } from '../../lib/api';
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
 import BrandMark from '../../components/BrandMark';
@@ -75,7 +75,7 @@ export default function AdminConsole() {
         setAuthStale(false);
         return { online: true, auth: false };
       }
-      if (probe.reason === 'auth' || adminAuthExpired()) {
+      if (probe.reason === 'auth' || probe.reason === 'no-session' || adminAuthExpired()) {
         setServerOnline(false);
         setAuthStale(true);
         return { online: false, auth: true };
@@ -93,9 +93,11 @@ export default function AdminConsole() {
     // only ones with a serverId so an admin edit can also apply server-side.
     const local = getUsers();
     let remote: AdminUserRow[] = [];
+    const signedIn = hasAdminToken();
     let live = await checkServerLiveness();
     try {
-      const sr = await getAdminUsers();
+      // Reading admin data needs a token; without one these calls can only 401.
+      const sr = signedIn ? await getAdminUsers() : { ok: false, offline: false, data: null };
       if (sr.ok) live = { online: true, auth: false };
       if (sr.ok && sr.data) {
         remote = sr.data.map(m => ({
@@ -147,7 +149,7 @@ export default function AdminConsole() {
     const localThreads = getThreads();
     let serverThreads: AdminThread[] = [];
     try {
-      const tr = await getAdminThreads();
+      const tr = hasAdminToken() ? await getAdminThreads() : { ok: false, offline: false, data: null };
       if (tr.ok && tr.data) {
         serverThreads = tr.data.map(t => ({
           id: t.id,
@@ -259,16 +261,14 @@ export default function AdminConsole() {
       });
   }
 
-  function logout() { sessionStorage.removeItem('ssb_admin'); nav('/xk9-admin-console-7f3a'); }
+  function logout() { adminLogout(); nav('/xk9-admin-console-7f3a'); }
 
-  useEffect(() => { reload(); }, []);
+  useEffect(() => { reload().catch(() => null); }, []);
+  // One poller, not two: a duplicate interval doubled the request rate and raced
+  // itself. While signed out reload() skips the admin reads, so a rejected token
+  // cannot spam the server or leave the banner stuck.
   useEffect(() => {
     const id = setInterval(() => { reload().catch(() => null); }, 5000);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    const id = setInterval(() => reload(), 5000);
     return () => clearInterval(id);
   }, []);
 
@@ -314,9 +314,9 @@ export default function AdminConsole() {
         </div>
       ) : authStale ? (
         <div style={{ background: '#7C4A03', borderBottom: '1px solid #F59E0B', padding: '10px 24px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#FDE68A', textAlign: 'center' }}>
-          ⏳ Session expired — the shared server is UP, but this browser needs a fresh sign-in.{' '}
+           Admin sign-in required — the shared server is connected, but this browser needs to sign in to reply, verify customers and set balances.{' '}
           <button onClick={logout} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 700, color: '#0A2044', background: '#FDE68A', border: 'none', padding: '4px 12px', cursor: 'pointer' }}>
-            RE-LOGIN
+            SIGN IN
           </button>
         </div>
       ) : (
