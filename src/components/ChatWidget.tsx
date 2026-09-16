@@ -1,11 +1,34 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router';
 import { chatIdentity, pushChatMessage, getThreadMessages, markThreadRead, type ChatMessage } from '../lib/localStore';
-import { getMyChatThread, sendChatMessage, markMyChatRead, getChatPresence } from '../lib/api';
+import { getMyChatThread, sendChatMessage, markMyChatRead, getChatPresence, sendChatTyping } from '../lib/api';
 import { subscribeToChat, closeChatStream, type ChatEvent } from '../lib/chatTransport';
 
 /** Quick-pick emojis for the composer — typing them directly works too. */
 const CHAT_EMOJIS = ['😀','😊','😂','🥰','😍','😎','😌','😅','🤣','👍','👏','👋','👌','🫶','💯','✅','🔥','🎉','❤️','💰','🏦','📲','⏰','🙋'];
+
+/** WhatsApp-style read receipt: one grey tick (sent) — blue double-tick (read).
+ * `onDark` renders a lighter variant for use inside a blue bubble. */
+function ReadTicks({ read, onDark }: { read?: boolean; onDark?: boolean }) {
+  const color = read ? (onDark ? '#BDE0FF' : '#0A84FF') : (onDark ? '#D6E4F5' : '#A2AAB5');
+  return (
+    <svg width="15" height="11" viewBox="0 0 18 12" fill="none" aria-label={read ? 'Read' : 'Sent'} role="img" style={{ flexShrink: 0 }}>
+      <path d="M1 6.2 4.4 9.6 12 2" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      {read && <path d="M7 9.8 7.9 10.7 16.8 2" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" fill="none" />}
+    </svg>
+  );
+}
+
+/** Three animated dots shown while the other side is typing. */
+function TypingDots() {
+  return (
+    <span style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }} aria-label="typing">
+      <span className="typing-dot" />
+      <span className="typing-dot" />
+      <span className="typing-dot" />
+    </span>
+  );
+}
 
 /** Mon–Fri, 9am–6pm in New York — the hours the widget advertises. */
 function withinSupportHours(): boolean {
@@ -26,9 +49,12 @@ export default function ChatWidget() {
   const [unreadBadge, setUnreadBadge] = useState(false);
   const [agentsConnected, setAgentsConnected] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [agentTyping, setAgentTyping] = useState(false);
   const openRef = useRef(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const agentTypingTimer = useRef<number | null>(null);
+  const typingSentAtRef = useRef(0);
   // Customers may send as many messages as they like, one after another, so
   // several requests can be in flight at once. Each send takes a ticket and only
   // the newest response is allowed to replace the list — an older one would be
@@ -63,16 +89,32 @@ export default function ChatWidget() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedIn]);
 
-  // Live updates: admin replies appear the moment they are sent, and the unread
-  // badge lights up even while the widget is closed.
+  // Live updates: admin replies appear the moment they are sent, "typing…" shows
+  // as the agent types, and blue ticks update the instant the admin reads the
+  // thread — all without waiting for the poll — even while the widget is closed.
   useEffect(() => {
     if (!signedIn) return;
     subscribeToChat('user', (event: ChatEvent) => {
-      const mine = event.messages.filter(m => m && typeof m.text === 'string');
+      if (event.type === 'typing') {
+        if (event.role !== 'admin') return;
+        setAgentTyping(true);
+        if (agentTypingTimer.current) window.clearTimeout(agentTypingTimer.current);
+        agentTypingTimer.current = window.setTimeout(() => setAgentTyping(false), 3000);
+        return;
+      }
+      if (event.type === 'read') {
+        const updated = (event.messages || []).filter(m => m && typeof m.text === 'string');
+        if (updated.length > 0) applyMessages(updated as ChatMessage[]);
+        return;
+      }
+      const mine = (event.messages || []).filter(m => m && typeof m.text === 'string');
       if (mine.length === 0) return;
+      const last = mine[mine.length - 1];
+      // Reading the open widget instantly flips the agent's ticks to blue.
+      if (last && last.from === 'admin' && openRef.current) markMyChatRead().catch(() => null);
       applyMessages(mine as ChatMessage[]);
     });
-    return () => { closeChatStream(); };
+    return () => { if (agentTypingTimer.current) window.clearTimeout(agentTypingTimer.current); closeChatStream(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedIn]);
 
@@ -206,6 +248,18 @@ export default function ChatWidget() {
       });
   }
 
+  /** Throttled "typing…" heartbeat so the agent sees you're typing in realtime
+   * without flooding the server on every keystroke. */
+  function handleInput(value: string) {
+    setInput(value);
+    if (!value.trim()) return;
+    const now = Date.now();
+    if (now - typingSentAtRef.current > 1500) {
+      typingSentAtRef.current = now;
+      sendChatTyping().catch(() => null);
+    }
+  }
+
   return (
     <div className="chat-widget no-print" style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 100 }}>
       {open && (
@@ -244,10 +298,27 @@ export default function ChatWidget() {
                   <div style={{ maxWidth: '75%', padding: '8px 12px', background: m.from === 'user' ? '#123C7C' : '#F4F6F8', color: m.from === 'user' ? '#fff' : '#0A2044', fontSize: '13px', lineHeight: 1.5 }}>
                     {m.text}
                   </div>
-                  {m.time && <p style={{ margin: '3px 0 0', fontSize: '10px', color: '#9CA3AF', textAlign: m.from === 'user' ? 'right' : 'left' }}>{m.time}</p>}
+                  {m.time && (
+                    <p style={{ margin: '3px 0 0', fontSize: '10px', color: '#9CA3AF', textAlign: m.from === 'user' ? 'right' : 'left', display: m.from === 'user' ? 'flex' : 'block', alignItems: 'center', gap: '4px', justifyContent: 'flex-end' }}>
+                      {m.time}
+                      {m.from === 'user' && <ReadTicks read={!!m.read} />}
+                    </p>
+                  )}
                 </div>
               </div>
             ))}
+
+            {/* Agent is typing… */}
+            {agentTyping && (
+              <div style={{ display: 'flex', flexDirection: 'row', gap: '8px', alignItems: 'flex-end' }}>
+                <div style={{ width: '28px', height: '28px', background: '#123C7C', borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1L1.5 3.5V8C1.5 11.1 4 13.5 7 14C10 13.5 12.5 11.1 12.5 8V3.5L7 1Z" fill="#fff" /><rect x="5.5" y="6" width="3" height="3.5" rx="0.25" fill="none" stroke="#123C7C" strokeWidth="0.8" /><path d="M5.8 6V5.25C5.8 4.284 6.585 3.5 7.55 3.5" stroke="#123C7C" strokeWidth="0.8" strokeLinecap="square" /></svg>
+                </div>
+                <div style={{ background: '#F4F6F8', color: '#0A2044', padding: '10px 13px', display: 'flex', alignItems: 'center' }}>
+                  <TypingDots />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* The composer is always available: a customer can send as many
@@ -266,7 +337,7 @@ export default function ChatWidget() {
             <input
               ref={inputRef}
               value={input}
-              onChange={e => setInput(e.target.value)}
+              onChange={e => handleInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { setEmojiOpen(false); send(); } }}
               maxLength={2000}
               placeholder="Type a message..."

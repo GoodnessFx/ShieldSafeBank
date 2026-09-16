@@ -363,6 +363,7 @@ export interface ChatMessageData {
   text: string;
   time: string;
   at: string;
+  read?: boolean;
 }
 
 export interface MyChatResult {
@@ -382,6 +383,11 @@ export async function sendChatMessage(text: string) {
 
 export async function markMyChatRead() {
   return apiFetch('/chat/read', { method: 'POST' });
+}
+
+/** User "typing…" heartbeat for the shared server (throttled by the caller). */
+export async function sendChatTyping() {
+  return apiFetch('/chat/typing', { method: 'POST', body: {} });
 }
 
 /** Presence for the customer chat header: is an agent at the console now? */
@@ -616,6 +622,11 @@ export async function replyToAll(text: string) {
 
 export async function markAdminThreadRead(threadId: string) {
   return adminFetch(`/admin/threads/${threadId}/read`, { method: 'POST' });
+}
+
+/** Admin "typing…" heartbeat for a specific conversation (throttled by caller). */
+export async function sendAdminTyping(threadId: string) {
+  return adminFetch(`/admin/threads/${threadId}/typing`, { method: 'POST', body: {} });
 }
 
 export async function simulateDeposit(userId: string, asset: string, amount: number) {

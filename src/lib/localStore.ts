@@ -49,6 +49,8 @@ export interface ChatMessage {
   text: string;
   time: string;
   at: string;
+  /** True once the receiving side has seen this message (blue-tick receipt). */
+  read?: boolean;
 }
 
 export interface ChatThread {

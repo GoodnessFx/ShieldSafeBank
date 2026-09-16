@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
-import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken } from '../../lib/api';
+import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping } from '../../lib/api';
 import { subscribeToChat, closeChatStream, type ChatEvent } from '../../lib/chatTransport';
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
@@ -45,6 +45,17 @@ function parseServerBalance(value: string): number {
 /** Quick-pick emojis for the admin composer — typing them directly works too. */
 const CHAT_EMOJIS = ['😀','😊','😂','🥰','😍','😎','😌','😅','🤣','👍','👏','👋','👌','🫶','💯','✅','🔥','🎉','❤️','💰','🏦','📲','⏰','🙋'];
 
+/** Three animated dots shown while the customer is typing. */
+function TypingDots() {
+  return (
+    <span style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }} aria-label="typing">
+      <span className="typing-dot" />
+      <span className="typing-dot" />
+      <span className="typing-dot" />
+    </span>
+  );
+}
+
 export default function AdminConsole() {
   const nav = useNavigate();
   const [tab, setTab] = useState<Tab>('chat');
@@ -74,6 +85,9 @@ export default function AdminConsole() {
   const [broadcastInput, setBroadcastInput] = useState('');
   const [emojiOpen, setEmojiOpen] = useState(false);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
+  // threadId -> true while that customer is currently typing.
+  const [typingMap, setTypingMap] = useState<Record<string, boolean>>({});
+  const typingSentAtRef = useRef(0);
 
   // If the shared server is reachable but the stored admin token is stale, the
   // banner says RE-LOGIN (green fix: one click), never OFFLINE. Render free
@@ -235,6 +249,17 @@ export default function AdminConsole() {
     await loadThreads();
   }
 
+  /** Throttled "typing…" heartbeat so the customer sees you're typing in realtime. */
+  function handleChatInput(value: string) {
+    setChatInput(value);
+    if (!value.trim() || !activeThread) return;
+    const now = Date.now();
+    if (now - typingSentAtRef.current > 1500) {
+      typingSentAtRef.current = now;
+      sendAdminTyping(activeThread).catch(() => null);
+    }
+  }
+
   async function sendBroadcast() {
     const text = broadcastInput.trim();
     if (!text || threads.length === 0) return;
@@ -327,16 +352,33 @@ export default function AdminConsole() {
     return () => clearInterval(id);
   }, []);
 
-  // Realtime: new customer messages appear (and bump the unread counter) the
-  // instant they are sent, on every open admin browser, without waiting for the
-  // 5s poll. The poll stays as a safety net for missed events.
+  // Realtime: new customer messages appear (and bump the unread counter), a
+  // "typing…" badge shows while a customer is typing, and blue read ticks flip
+  // the instant a customer opens the thread — on every open admin browser,
+  // without waiting for the 5s poll. The poll stays as a safety net.
   useEffect(() => {
     if (!hasAdminToken()) return;
     subscribeToChat('admin', (event: ChatEvent) => {
+      if (event.type === 'typing') {
+        if (event.role !== 'user' || !event.threadId) return;
+        setTypingMap(prev => ({ ...prev, [event.threadId]: true }));
+        window.setTimeout(() => { setTypingMap(prev => ({ ...prev, [event.threadId]: false })); }, 3000);
+        return;
+      }
+      if (event.type === 'read') {
+        if (activeThread === event.threadId && event.messages) {
+          setMessages(event.messages.map(m => ({ id: m.id, from: m.from, text: m.text, time: m.time, at: m.at, read: !!m.read })));
+        }
+        return;
+      }
+      if (!event.messages) return;
       loadThreads().catch(() => null);
       if (activeThread === event.threadId) {
-        setMessages(event.messages.map(m => ({ from: m.from, text: m.text, time: m.time, at: m.at })));
-        markAdminThreadRead(event.threadId).catch(() => null);
+        setMessages(event.messages.map(m => ({ id: m.id, from: m.from, text: m.text, time: m.time, at: m.at, read: !!m.read })));
+        const last = event.messages[event.messages.length - 1];
+        // Only an incoming customer message marks a thread read; an admin's own
+        // reply must not reset the badges.
+        if (last && last.from === 'user') markAdminThreadRead(event.threadId).catch(() => null);
       }
     });
     return () => { closeChatStream(); };
@@ -519,7 +561,11 @@ export default function AdminConsole() {
                     <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: thread.unread ? '#F87171' : '#6B7280', whiteSpace: 'nowrap' }}>{fmtShortTime(thread.at) || thread.time}</span>
                   </div>
                   {thread.email && <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#6B7280', margin: '0 0 4px' }}>{thread.email}</p>}
-                  <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: thread.unread ? '#A9C6E8' : '#6B7280', fontWeight: thread.unread ? 600 : 400, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{thread.preview}</p>
+                  {typingMap[thread.id] ? (
+                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#22C55E', fontWeight: 600, margin: 0, fontStyle: 'italic' }}>typing…</p>
+                  ) : (
+                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: thread.unread ? '#A9C6E8' : '#6B7280', fontWeight: thread.unread ? 600 : 400, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{thread.preview}</p>
+                  )}
                 </button>
               ))}
             </div>
@@ -533,10 +579,22 @@ export default function AdminConsole() {
                   <div key={m.id || i} style={{ display: 'flex', flexDirection: m.from === 'admin' ? 'row-reverse' : 'row', gap: '10px', alignItems: 'flex-end' }}>
                     <div style={{ maxWidth: '72%', background: m.from === 'admin' ? '#123C7C' : '#F4F6F8', color: m.from === 'admin' ? '#fff' : '#0A2044', borderRadius: '10px', padding: '10px 14px' }}>
                       <p style={{ fontFamily: 'Sora, sans-serif', fontSize: '13px', margin: '0 0 4px', lineHeight: 1.5 }}>{m.text}</p>
-                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#9CA3AF', margin: 0, textAlign: m.from === 'admin' ? 'right' : 'left' }}>{fmtShortTime(m.at) || m.time}</p>
+                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#9CA3AF', margin: 0, textAlign: m.from === 'admin' ? 'right' : 'left', display: m.from === 'admin' ? 'flex' : 'block', alignItems: 'center', gap: '4px', justifyContent: 'flex-end' }}>
+                        {fmtShortTime(m.at) || m.time}
+                        {m.from === 'admin' && <ReadTicks read={!!m.read} onDark />}
+                      </p>
                     </div>
                   </div>
                 ))}
+
+                {activeThread && typingMap[activeThread] && (
+                  <div style={{ display: 'flex', flexDirection: 'row', gap: '10px', alignItems: 'flex-end' }}>
+                    <div style={{ width: '28px', height: '28px', background: '#F4F6F8', border: '1px solid #DCE3EA', borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#0A2044', fontWeight: 700, fontSize: '11px' }}>…</div>
+                    <div style={{ background: '#F4F6F8', color: '#0A2044', borderRadius: '10px', padding: '10px 14px', display: 'flex', alignItems: 'center' }}>
+                      <TypingDots />
+                    </div>
+                  </div>
+                )}
               </div>
               <div style={{ borderTop: '1px solid #DCE3EA', padding: '12px 16px', display: 'flex', gap: '10px', position: 'relative' }}>
                 {emojiOpen && (
@@ -549,7 +607,7 @@ export default function AdminConsole() {
                 )}
                 <button onClick={() => setEmojiOpen(o => !o)} aria-label="Insert emoji" aria-expanded={emojiOpen}
                   style={{ background: 'none', border: '1px solid #DCE3EA', cursor: 'pointer', fontSize: '16px', lineHeight: 1, padding: '4px 8px', color: '#0A2044', flexShrink: 0 }}>😊</button>
-                <input ref={chatInputRef} value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { setEmojiOpen(false); sendReply(); } }}
+                <input ref={chatInputRef} value={chatInput} onChange={e => handleChatInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { setEmojiOpen(false); sendReply(); } }}
                   placeholder="Type a reply…"
                   style={{ flex: 1, background: '#fff', border: '1px solid #DCE3EA', padding: '9px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#0A2044', outline: 'none' }} />
                 <button onClick={sendReply} style={{ background: '#123C7C', color: '#fff', border: 'none', padding: '9px 18px', fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: '12px', cursor: 'pointer', letterSpacing: '0.04em' }}>SEND</button>

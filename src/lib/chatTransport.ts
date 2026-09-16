@@ -15,6 +15,7 @@ export interface LiveMessage {
   text: string;
   time: string;
   at: string;
+  read?: boolean;
 }
 
 export interface LiveThread {
@@ -26,9 +27,12 @@ export interface LiveThread {
 
 export interface ChatEvent {
   eventId: number;
+  /** 'chat' = new/updated messages, 'typing' = someone is typing, 'read' = a recipient opened the thread. */
+  type?: 'chat' | 'typing' | 'read';
   threadId: string;
-  messages: LiveMessage[];
-  thread: LiveThread | null;
+  messages?: LiveMessage[];
+  thread?: LiveThread | null;
+  role?: 'user' | 'admin';
 }
 
 type Listener = (event: ChatEvent) => void;

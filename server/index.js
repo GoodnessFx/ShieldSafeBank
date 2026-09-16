@@ -249,6 +249,7 @@ function normalizeDB(db) {
       id: m.id || `legacy${id}${Math.random().toString(36).slice(2, 8)}`,
       time: m.time || '',
       at: m.at || '',
+      read: !!m.read,
     })) : [];
   });
   store.supportMessages = Array.isArray(store.supportMessages) ? store.supportMessages : [];
@@ -334,12 +335,14 @@ let chatEventId = 0;
 
 function makeMessage(db, threadId, from, text) {
   const at = new Date().toISOString();
-  return { id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, from, text, time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }), at };
+  return { id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, from, text, time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }), at, read: false };
 }
 
-function publishChatEvent(threadId, messages, thread) {
+/** Fans an SSE frame out to every attached subscriber. Customers only ever get
+ * events for their own thread; admins receive everything. */
+function broadcastChat(payload, threadId) {
   chatEventId += 1;
-  const payload = JSON.stringify({ eventId: chatEventId, threadId, messages, thread });
+  const body = JSON.stringify({ ...payload, eventId: chatEventId });
   for (const sub of chatSubscribers) {
     // Customers only ever receive events for their own thread.
     if (sub.userId && sub.threadId && sub.threadId !== threadId) continue;
@@ -350,11 +353,25 @@ function publishChatEvent(threadId, messages, thread) {
       sub.threadId = threadId;
     }
     try {
-      sub.res.write(`id: ${chatEventId}\nevent: chat\ndata: ${payload}\n\n`);
+      sub.res.write(`id: ${chatEventId}\nevent: chat\ndata: ${body}\n\n`);
     } catch {
       chatSubscribers.delete(sub);
     }
   }
+}
+
+function publishChatEvent(threadId, messages, thread) {
+  broadcastChat({ type: 'chat', threadId, messages, thread }, threadId);
+}
+
+function publishTyping(threadId, role) {
+  broadcastChat({ type: 'typing', threadId, role }, threadId);
+}
+
+/** A recipient has opened a thread: broadcast the updated read flags so the
+ * sender's UI can flip its ticks to blue instantly. */
+function publishRead(threadId, messages) {
+  broadcastChat({ type: 'read', threadId, messages }, threadId);
 }
 
 function openChatStream(req, res, identity) {
@@ -697,7 +714,22 @@ app.post('/api/chat/send', authMiddleware, (req, res) => {
 
 app.post('/api/chat/read', authMiddleware, (req, res) => {
   const thread = (db.threads || []).find(t => t.userId === req.user.id);
-  if (thread) { thread.unread = false; saveDB(db); }
+  if (thread) {
+    thread.unread = false;
+    // The customer just read every admin message in this thread — flip their
+    // read flags so the admin's own bubbles can show a blue tick instantly.
+    const msgs = (db.messages[thread.id] || []).map(m => m.from === 'admin' ? { ...m, read: true } : m);
+    db.messages[thread.id] = msgs;
+    saveDB(db);
+    if (msgs.some(m => m.from === 'admin' && m.read)) publishRead(thread.id, msgs);
+  }
+  res.json({ ok: true });
+});
+
+// Realtime "typing…" heartbeat from the customer — throttled on the client.
+app.post('/api/chat/typing', authMiddleware, (req, res) => {
+  const thread = (db.threads || []).find(t => t.userId === req.user.id);
+  if (thread) publishTyping(thread.id, 'user');
   res.json({ ok: true });
 });
 
@@ -822,10 +854,25 @@ app.post('/api/admin/threads/reply-all', adminMiddleware, (req, res) => {
   res.json({ ok:true, delivered, threads: db.threads });
 });
 
-// Marks a thread as read so its unread badge clears on the admin console.
+// Marks a thread as read so its unread badge clears on the admin console, and
+// flips the read flags on the customer's messages so the customer's outgoing
+// bubbles can show a blue tick once the reply has been seen.
 app.post('/api/admin/threads/:id/read', adminMiddleware, (req, res) => {
   const thread = db.threads.find(t => t.id === req.params.id);
-  if (thread) { thread.unread = false; saveDB(db); }
+  if (thread) {
+    thread.unread = false;
+    const msgs = (db.messages[thread.id] || []).map(m => m.from === 'user' ? { ...m, read: true } : m);
+    db.messages[thread.id] = msgs;
+    saveDB(db);
+    if (msgs.some(m => m.from === 'user' && m.read)) publishRead(thread.id, msgs);
+  }
+  res.json({ ok:true });
+});
+
+// Realtime "typing…" heartbeat from an admin on a specific conversation.
+app.post('/api/admin/threads/:id/typing', adminMiddleware, (req, res) => {
+  const thread = db.threads.find(t => t.id === req.params.id);
+  if (thread) publishTyping(thread.id, 'admin');
   res.json({ ok:true });
 });
 
