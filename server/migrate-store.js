@@ -16,9 +16,33 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATABASE_URL = process.env.DATABASE_URL || '';
+
+/**
+ * Loads KEY=VALUE pairs from a git-ignored .env next to this script (or in the
+ * working directory) when the variable is not already in the environment, so the
+ * Supabase URI never has to be pasted into the shell (or into a chat window).
+ */
+function loadEnvFile() {
+  for (const candidate of [join(__dirname, '.env'), join(process.cwd(), '.env')]) {
+    if (!existsSync(candidate)) continue;
+    for (const line of readFileSync(candidate, 'utf-8').split(/\r?\n/)) {
+      const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+      if (!m) continue;
+      const value = m[2].trim().replace(/^["']|["']$/g, '');
+      if (value && !process.env[m[1]]) process.env[m[1]] = value;
+    }
+    return candidate;
+  }
+  return '';
+}
+
+const envFile = loadEnvFile();
+const DATABASE_URL = (process.env.DATABASE_URL || '').trim();
 if (!DATABASE_URL) {
-  console.error('DATABASE_URL is required. Set it to your Supabase Postgres URI.');
+  console.error('DATABASE_URL is required. Set it to your Supabase Postgres URI:');
+  console.error(`  • in the environment, or`);
+  console.error(`  • in ${envFile || join(__dirname, '.env')} as DATABASE_URL=postgresql://...`);
+  console.error('That .env file is git-ignored, so the URI is never committed.');
   process.exit(1);
 }
 
