@@ -1,8 +1,15 @@
 # Deploys the shared backend (chats, users, verification, balances).
 #
-# Free tier: works immediately, but data resets on restart/redeploy (no disk).
-# For production persistence upgrade the instance to Starter and add a disk
-# mounted at /var/data with DATA_DIR=/var/data in the Render dashboard.
+# Storage is Postgres through DATABASE_URL (Supabase). The database — not the
+# container filesystem — is what makes signups, chats and balances survive
+# restarts and redeploys.
+#
+# `sync: false` keeps DATABASE_URL in the Render dashboard only: a Blueprint
+# sync neither overwrites nor erases it, and the URI is never committed here.
+# Set it under shieldsafebank-api → Environment → Environment Variables.
+#
+# Without DATABASE_URL the service falls back to DATA_DIR/store.json, which the
+# free plan does not persist (no mounted disk), so data would reset on restart.
 services:
   - type: web
     name: shieldsafebank-api
@@ -12,6 +19,8 @@ services:
     buildCommand: npm install
     startCommand: npm start
     envVars:
+      - key: DATABASE_URL
+        sync: false
       - key: DATA_DIR
         value: /var/data
     healthCheckPath: /api/health
