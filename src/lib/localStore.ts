@@ -396,6 +396,17 @@ export function markThreadRead(id: string) {
   write(THREADS_KEY, threads);
 }
 
+/** Deletes a thread and its messages from the browser's local store. */
+export function removeThread(id: string) {
+  const threads = read<ChatThread[]>(THREADS_KEY, []);
+  write(THREADS_KEY, threads.filter(t => t.id !== id));
+  const messages = read<Record<string, ChatMessage[]>>(MESSAGES_KEY, {});
+  if (messages[id]) {
+    delete messages[id];
+    write(MESSAGES_KEY, messages);
+  }
+}
+
 export function getUser(email: string): StoreUser | null {
   const users = read<Record<string, StoreUser>>(USERS_KEY, {});
   return users[email.toLowerCase()] || null;

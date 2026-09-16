@@ -248,6 +248,9 @@ async function persist(store) {
         [name, Number(value) || 0],
       );
     }
+    for (const e of store.loginEvents || []) {
+      await upsert('login_events', 'id', e.id, e);
+    }
     await client.query('COMMIT');
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch { /* already failed */ }

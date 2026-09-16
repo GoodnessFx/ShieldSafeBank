@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY, data JSONB NOT NUL
 CREATE TABLE IF NOT EXISTS kyc_queue (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS messages (thread_id TEXT PRIMARY KEY, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS login_events (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS support_messages (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
 `;
@@ -74,7 +75,8 @@ const SEED = {
     ],
   },
   supportMessages: [],
-  counters: { user:7, tx:1092, thread:3, kyc:3, support:1 },
+  loginEvents: [],
+  counters: { user:7, tx:1092, thread:3, kyc:3, support:1, login:0 },
 };
 
 function readJsonStore() {
@@ -102,6 +104,7 @@ async function persistToPg(store) {
     await client.query('DELETE FROM kyc_queue');
     await client.query('DELETE FROM threads');
     await client.query('DELETE FROM messages');
+    await client.query('DELETE FROM login_events');
     await client.query('DELETE FROM support_messages');
     await client.query('DELETE FROM counters');
     for (const u of store.users) {
@@ -118,6 +121,9 @@ async function persistToPg(store) {
     }
     for (const [threadId, msgs] of Object.entries(store.messages || {})) {
       await client.query('INSERT INTO messages (thread_id, data) VALUES ($1, $2::jsonb)', [threadId, JSON.stringify(msgs)]);
+    }
+    for (const e of store.loginEvents || []) {
+      await client.query('INSERT INTO login_events (id, data) VALUES ($1, $2::jsonb)', [e.id, JSON.stringify(e)]);
     }
     for (const s of store.supportMessages) {
       await client.query('INSERT INTO support_messages (id, data) VALUES ($1, $2::jsonb)', [s.id, JSON.stringify(s)]);
@@ -138,12 +144,13 @@ async function loadFromPg() {
   const client = await pool.connect();
   try {
     await ensureSchema(client);
-    const [users, transactions, kycQueue, threads, messages, supportMessages, counters] = await Promise.all([
+    const [users, transactions, kycQueue, threads, messages, loginEvents, supportMessages, counters] = await Promise.all([
       client.query('SELECT data FROM users'),
       client.query('SELECT data FROM transactions'),
       client.query('SELECT data FROM kyc_queue'),
       client.query('SELECT data FROM threads'),
       client.query('SELECT thread_id, data FROM messages'),
+      client.query('SELECT data FROM login_events'),
       client.query('SELECT data FROM support_messages'),
       client.query('SELECT name, value FROM counters'),
     ]);
@@ -157,6 +164,7 @@ async function loadFromPg() {
       kycQueue: kycQueue.rows.map(r => r.data),
       threads: threads.rows.map(r => r.data),
       messages: msgMap,
+      loginEvents: loginEvents.rows.map(r => r.data),
       supportMessages: supportMessages.rows.map(r => r.data),
       counters: counterMap,
     });
@@ -253,6 +261,13 @@ function normalizeDB(db) {
     })) : [];
   });
   store.supportMessages = Array.isArray(store.supportMessages) ? store.supportMessages : [];
+  store.loginEvents = Array.isArray(store.loginEvents) ? store.loginEvents : [];
+  store.loginEvents.forEach(e => {
+    e.id = e.id || '';
+    e.userId = e.userId || '';
+    e.email = e.email || '';
+    e.loggedInAt = e.loggedInAt || '';
+  });
   store.counters = store.counters && typeof store.counters === 'object' ? store.counters : {};
   return store;
 }
@@ -314,8 +329,23 @@ function userIdFromToken(token) {
 
 function nextId(db, type) {
   db.counters[type] = (db.counters[type] || 0) + 1;
-  const prefixes = { user:'U', tx:'T', thread:'C', kyc:'K', support:'S' };
+  const prefixes = { user:'U', tx:'T', thread:'C', kyc:'K', support:'S', login:'L' };
   return `${prefixes[type] || type.toUpperCase()}${String(db.counters[type]).padStart(4,'0')}`;
+}
+
+/** Records every successful email/password login, including repeats. */
+function recordLoginEvent(user) {
+  if (!user) return null;
+  const loggedInAt = new Date().toISOString();
+  const event = {
+    id: nextId(db, 'login'),
+    userId: user.id,
+    email: user.email || '',
+    loggedInAt,
+  };
+  db.loginEvents.push(event);
+  saveDB(db);
+  return event;
 }
 
 /* ---------------------------------------------------------------------------
@@ -494,6 +524,7 @@ app.post('/api/auth/login', (req, res) => {
   if (user.status === 'suspended') return res.status(403).json({ error:'Account is suspended.' });
   const token = userToken(user.id);
   user.lastLogin = new Date().toISOString();
+  recordLoginEvent(user);
   saveDB(db);
   res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
 });
@@ -799,6 +830,17 @@ app.get('/api/admin/threads', adminMiddleware, (_, res) => {
   res.json(db.threads);
 });
 
+// Login history for one user, newest first. The admin console lists these under
+// each user row so repeat sign-ins are visible exactly as they happened.
+app.get('/api/admin/users/:id/logins', adminMiddleware, (req, res) => {
+  const id = String(req.params.id || '');
+  const history = (db.loginEvents || [])
+    .filter(e => e.userId === id)
+    .map(e => ({ id: e.id, userId: e.userId, email: e.email || '', loggedInAt: e.loggedInAt || '' }))
+    .sort((a, b) => (a.loggedInAt < b.loggedInAt ? 1 : -1));
+  res.json(history);
+});
+
 // Realtime stream for the admin console: pushes every customer message the
 // moment it arrives, on every thread, in every open admin browser.
 app.get('/api/admin/chat/stream', (req, res) => {
@@ -874,6 +916,18 @@ app.post('/api/admin/threads/:id/typing', adminMiddleware, (req, res) => {
   const thread = db.threads.find(t => t.id === req.params.id);
   if (thread) publishTyping(thread.id, 'admin');
   res.json({ ok:true });
+});
+
+// Deletes a whole conversation and its messages from the same admin store the
+// console reads, so the thread disappears everywhere instead of only locally.
+app.delete('/api/admin/threads/:id', adminMiddleware, (req, res) => {
+  const id = String(req.params.id || '');
+  const thread = db.threads.find(t => t.id === id);
+  if (!thread) return res.status(404).json({ error: 'Thread not found.' });
+  db.threads = db.threads.filter(t => t.id !== id);
+  delete db.messages[id];
+  saveDB(db);
+  res.json({ ok: true, id });
 });
 
 app.post('/api/admin/simulate-deposit', adminMiddleware, (req, res) => {

@@ -629,6 +629,23 @@ export async function sendAdminTyping(threadId: string) {
   return adminFetch(`/admin/threads/${threadId}/typing`, { method: 'POST', body: {} });
 }
 
+/** Deletes a thread and its messages server-side (with local fallback below). */
+export async function deleteAdminThread(threadId: string) {
+  return adminFetch<{ ok: boolean; id?: string }>(`/admin/threads/${threadId}`, { method: 'DELETE' });
+}
+
+export interface AdminLoginEvent {
+  id: string;
+  userId: string;
+  email: string;
+  loggedInAt: string;
+}
+
+/** Full login history for one user, newest first. */
+export async function getAdminUserLogins(userId: string) {
+  return adminFetch<AdminLoginEvent[]>(`/admin/users/${userId}/logins`);
+}
+
 export async function simulateDeposit(userId: string, asset: string, amount: number) {
   return adminFetch<{ ok: boolean; usd: number; balance: number }>('/admin/simulate-deposit', { method: 'POST', body: { userId, asset, amount } });
 }

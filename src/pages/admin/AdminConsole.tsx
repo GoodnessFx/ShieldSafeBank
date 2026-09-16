@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
-import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
-import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping } from '../../lib/api';
+import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
+import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, type AdminLoginEvent } from '../../lib/api';
 import { subscribeToChat, closeChatStream, type ChatEvent } from '../../lib/chatTransport';
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
@@ -13,6 +13,25 @@ type Tab = 'chat' | 'users' | 'activity' | 'deposits';
  * user that only exists on the server side is merged in so the admin never
  * misses anyone who has signed up. `serverId` links a row to its server record. */
 type AdminUserRow = StoreUser & { serverId?: string };
+
+/** Login counts shown next to each user in the admin Users tab. */
+type LoginCountMap = Record<string, { total: number; today: number }>;
+
+/** Swipe and delete state for each thread row in the admin Chat Inbox. */
+type ThreadRowUi = {
+  offset: number;
+  confirm: boolean;
+  busy: boolean;
+};
+
+/** Count of logins that happened today (local calendar day). */
+function countLoginsToday(logins: AdminLoginEvent[]): number {
+  const today = new Date().toDateString();
+  return logins.filter(l => {
+    const d = new Date(l.loggedInAt);
+    return !isNaN(d.getTime()) && d.toDateString() === today;
+  }).length;
+}
 
 /** A conversation row in the admin Chat Inbox. `at` is the ISO timestamp of the
  * last message so we can show send/read times and render a red unread badge. */
@@ -100,6 +119,15 @@ export default function AdminConsole() {
   // threadId -> true while that customer is currently typing.
   const [typingMap, setTypingMap] = useState<Record<string, boolean>>({});
   const typingSentAtRef = useRef(0);
+  // serverId -> per-user login history shown under each Users row.
+  const [loginCounts, setLoginCounts] = useState<LoginCountMap>({});
+  const [expandedLogins, setExpandedLogins] = useState<Record<string, boolean>>({});
+  const [loginHistory, setLoginHistory] = useState<Record<string, AdminLoginEvent[]>>({});
+  const [loginsBusy, setLoginsBusy] = useState<Record<string, boolean>>({});
+  // threadId -> swipe offset / confirm / delete state for each Chat Inbox row.
+  const [threadUi, setThreadUi] = useState<Record<string, ThreadRowUi>>({});
+  const touchStartX = useRef<Record<string, number | null>>({});
+  const touchBaseX = useRef<Record<string, number>>({});
 
   // If the shared server is reachable but the stored admin token is stale, the
   // banner says RE-LOGIN (green fix: one click), never OFFLINE. Render free
@@ -177,6 +205,20 @@ export default function AdminConsole() {
 
     setActivity(getActivity());
     setKycQueue(getKycQueue());
+    const counts: LoginCountMap = {};
+    if (signedIn) {
+      for (const r of remote) {
+        if (!r.serverId) continue;
+        try {
+          const lr = await getAdminUserLogins(r.serverId);
+          if (lr.ok && lr.data) {
+            counts[r.serverId] = { total: lr.data.length, today: countLoginsToday(lr.data) };
+            setLoginHistory(prev => ({ ...prev, [r.serverId as string]: lr.data as AdminLoginEvent[] }));
+          }
+        } catch { /* keep the row without counts */ }
+      }
+    }
+    setLoginCounts(prev => ({ ...prev, ...counts }));
     const threadsNow = await loadThreads();
     if (activeThread) {
       setMessages(await loadMessages(activeThread));
@@ -259,6 +301,85 @@ export default function AdminConsole() {
     markThreadRead(id);
     setMessages(await loadMessages(id));
     await loadThreads();
+  }
+
+  async function toggleLogins(serverId?: string) {
+    if (!serverId) return;
+    const open = !expandedLogins[serverId];
+    setExpandedLogins(prev => ({ ...prev, [serverId]: open }));
+    if (!open || loginHistory[serverId]) return;
+    setLoginsBusy(prev => ({ ...prev, [serverId]: true }));
+    try {
+      const r = await getAdminUserLogins(serverId);
+      if (r.ok && r.data) {
+        setLoginHistory(prev => ({ ...prev, [serverId]: r.data as AdminLoginEvent[] }));
+        setLoginCounts(prev => ({ ...prev, [serverId]: { total: r.data!.length, today: countLoginsToday(r.data as AdminLoginEvent[]) } }));
+      }
+    } catch { /* keep the closed row even when history cannot load */ }
+    setLoginsBusy(prev => ({ ...prev, [serverId]: false }));
+  }
+
+  function loginCountLabel(serverId?: string): string | null {
+    if (!serverId) return null;
+    const counts = loginCounts[serverId];
+    if (!counts) return null;
+    if (counts.total <= 0) return '0 logins';
+    if (counts.today > 0) return `${counts.total} logins · ${counts.today} today`;
+    return `${counts.total} logins`;
+  }
+
+  function rowUi(id: string): ThreadRowUi {
+    return threadUi[id] || { offset: 0, confirm: false, busy: false };
+  }
+
+  function setRowUi(id: string, patch: Partial<ThreadRowUi>) {
+    setThreadUi(prev => ({ ...prev, [id]: { ...rowUi(id), ...patch } }));
+  }
+
+  // Standard mobile pattern: swiping left slides the row and reveals a red
+  // delete button underneath. Mouse users keep the visible delete button.
+  function onThreadTouchStart(id: string, e: React.TouchEvent) {
+    touchStartX.current[id] = e.touches[0]?.clientX ?? null;
+    touchBaseX.current[id] = rowUi(id).offset;
+  }
+
+  function onThreadTouchMove(id: string, e: React.TouchEvent) {
+    const start = touchStartX.current[id];
+    if (start === null || start === undefined) return;
+    const dx = (e.touches[0]?.clientX ?? start) - start;
+    const next = Math.min(0, Math.max(-96, (touchBaseX.current[id] || 0) + dx));
+    setRowUi(id, { offset: next });
+  }
+
+  function onThreadTouchEnd(id: string) {
+    touchStartX.current[id] = null;
+    const offset = rowUi(id).offset;
+    setRowUi(id, { offset: offset < -48 ? -96 : 0 });
+  }
+
+  async function confirmDeleteThread(id: string, threadName: string) {
+    if (rowUi(id).busy) return;
+    setRowUi(id, { busy: true });
+    try {
+      // Server first (hidden everywhere), then the browser's local copy. If the
+      // backend is offline we still clear it locally and reload shows the rest.
+      await deleteAdminThread(id).catch(() => null);
+      removeThread(id);
+      setThreads(prev => prev.filter(t => t.id !== id));
+      setThreadUi(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      if (activeThread === id) {
+        setActiveThread(null);
+        setMessages([]);
+      }
+      await loadThreads();
+    } finally {
+      setRowUi(id, { busy: false, confirm: false, offset: 0 });
+    }
+    void threadName;
   }
 
   /** Throttled "typing…" heartbeat so the customer sees you're typing in realtime. */
@@ -562,9 +683,32 @@ export default function AdminConsole() {
               </div>
               {threads.length === 0 ? (
                 <div style={{ padding: '40px 20px', textAlign: 'center', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#374151' }}>No chats yet. Messages from the app will appear here.</div>
-              ) : threads.map(thread => (
-                <button key={thread.id} onClick={() => selectThread(thread.id)}
-                  style={{ width: '100%', textAlign: 'left', padding: '14px 16px', background: activeThread === thread.id ? '#123C7C' : 'none', border: 'none', borderBottom: '1px solid #123C7C', cursor: 'pointer' }}>
+              ) : threads.map(thread => {
+                const ui = rowUi(thread.id);
+                return (
+                <div key={thread.id} style={{ position: 'relative', overflow: 'hidden', borderBottom: '1px solid #123C7C' }}>
+                  <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: '96px', background: '#DC2626', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {ui.confirm ? (
+                      <button onClick={() => confirmDeleteThread(thread.id, thread.user)}
+                        disabled={ui.busy}
+                        style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#fff', background: 'transparent', border: '1px solid #fff', padding: '6px 10px', cursor: ui.busy ? 'default' : 'pointer', letterSpacing: '0.04em' }}
+                      >
+                        {ui.busy ? 'DELETING…' : 'CONFIRM?'}
+                      </button>
+                    ) : (
+                      <button onClick={() => setRowUi(thread.id, { confirm: true, offset: -96 })}
+                        style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#fff', background: 'transparent', border: '1px solid #fff', padding: '6px 10px', cursor: 'pointer', letterSpacing: '0.04em' }}
+                      >
+                        DELETE
+                      </button>
+                    )}
+                  </div>
+                <button onClick={() => selectThread(thread.id)}
+                  onTouchStart={e => onThreadTouchStart(thread.id, e)}
+                  onTouchMove={e => onThreadTouchMove(thread.id, e)}
+                  onTouchEnd={() => onThreadTouchEnd(thread.id)}
+                  onTouchCancel={() => onThreadTouchEnd(thread.id)}
+                  style={{ width: '100%', textAlign: 'left', padding: '14px 16px', background: activeThread === thread.id ? '#123C7C' : '#0B2B5C', border: 'none', cursor: 'pointer', transform: `translateX(${ui.offset}px)`, transition: 'transform 0.15s ease-out' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                     <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: thread.unread ? 700 : 600, color: thread.unread ? '#fff' : '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       {thread.unread && <span style={{ width: '8px', height: '8px', background: '#DC2626', borderRadius: '50%', flexShrink: 0 }} />}
@@ -578,8 +722,29 @@ export default function AdminConsole() {
                   ) : (
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: thread.unread ? '#A9C6E8' : '#6B7280', fontWeight: thread.unread ? 600 : 400, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{thread.preview}</p>
                   )}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }}>
+                    {ui.confirm ? (
+                      <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <button onClick={e => { e.stopPropagation(); confirmDeleteThread(thread.id, thread.user); }}
+                          disabled={ui.busy}
+                          style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#fff', background: '#DC2626', border: 'none', padding: '4px 10px', cursor: ui.busy ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+                        >
+                          {ui.busy ? 'DELETING…' : 'CONFIRM DELETE'}
+                        </button>
+                        <button onClick={e => { e.stopPropagation(); setRowUi(thread.id, { confirm: false, offset: 0 }); }}
+                          style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#E5E7EB', background: '#374151', border: 'none', padding: '4px 8px', cursor: 'pointer' }}
+                        >✕</button>
+                      </span>
+                    ) : (
+                      <button onClick={e => { e.stopPropagation(); setRowUi(thread.id, { confirm: true, offset: -96 }); }}
+                        style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#EAB308', background: 'none', border: '1px solid #EAB308', padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      >DELETE</button>
+                    )}
+                  </div>
                 </button>
-              ))}
+                </div>
+                );
+              })}
             </div>
 
             {/* Thread view */}
@@ -639,7 +804,7 @@ export default function AdminConsole() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px' }}>
                 <thead>
                   <tr style={{ background: '#0B2B5C' }}>
-                    {['Name', 'Email', 'Account Number', 'Type', 'Balance', 'Status', 'Last Login', 'Joined'].map(h => (
+                    {['Name', 'Email', 'Account Number', 'Type', 'Balance', 'Status', 'Last Login', 'Joined', 'Logins'].map(h => (
                       <th key={h} style={{ padding: '10px 16px', textAlign: h === 'Balance' ? 'right' : 'left', color: '#4779C4', fontWeight: 600, fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid #123C7C', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -762,6 +927,33 @@ export default function AdminConsole() {
                       </td>
                       <td style={{ padding: '11px 16px', color: '#6B7280' }}>{fmtDateTime(u.lastLogin)}</td>
                       <td style={{ padding: '11px 16px', color: '#6B7280' }}>{fmtDateTime(u.joined)}</td>
+                      <td style={{ padding: '11px 16px', color: '#A9C6E8' }}>
+                        {(() => {
+                          const label = loginCountLabel(u.serverId);
+                          const history = u.serverId ? loginHistory[u.serverId] : undefined;
+                          const open = !!(u.serverId && expandedLogins[u.serverId]);
+                          const busy = !!(u.serverId && loginsBusy[u.serverId]);
+                          if (!u.serverId) return <span style={{ color: '#6B7280' }}>n/a</span>;
+                          return (
+                            <div>
+                              <button onClick={() => toggleLogins(u.serverId)}
+                                style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#A9C6E8', background: 'none', border: '1px solid #123C7C', padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                              >
+                                {busy ? 'LOADING…' : open ? 'HIDE LOGINS' : label || 'VIEW LOGINS'}
+                              </button>
+                              {open && (
+                                <div style={{ marginTop: '8px', maxHeight: '160px', overflowY: 'auto', border: '1px solid #123C7C', background: '#0A2044' }}>
+                                  {!history || history.length === 0 ? (
+                                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', margin: 0, padding: '10px 12px' }}>No logins recorded yet.</p>
+                                  ) : history.map(h => (
+                                    <p key={h.id} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#E5E7EB', margin: 0, padding: '7px 12px', borderBottom: '1px solid #123C7C', whiteSpace: 'nowrap' }}>{fmtDateTime(h.loggedInAt)}</p>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
