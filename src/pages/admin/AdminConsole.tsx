@@ -56,6 +56,18 @@ function TypingDots() {
   );
 }
 
+/** WhatsApp-style read receipt: one grey tick (sent) — blue double-tick (read).
+ * `onDark` renders a lighter variant for use inside a blue bubble. */
+function ReadTicks({ read, onDark }: { read?: boolean; onDark?: boolean }) {
+  const color = read ? (onDark ? '#BDE0FF' : '#0A84FF') : (onDark ? '#D6E4F5' : '#A2AAB5');
+  return (
+    <svg width="15" height="11" viewBox="0 0 18 12" fill="none" aria-label={read ? 'Read' : 'Sent'} role="img" style={{ flexShrink: 0 }}>
+      <path d="M1 6.2 4.4 9.6 12 2" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      {read && <path d="M7 9.8 7.9 10.7 16.8 2" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" fill="none" />}
+    </svg>
+  );
+}
+
 export default function AdminConsole() {
   const nav = useNavigate();
   const [tab, setTab] = useState<Tab>('chat');
