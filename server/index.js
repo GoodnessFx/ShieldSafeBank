@@ -152,6 +152,13 @@ app.get('/api/health', (_, res) => {
   res.json({ ok: true, service: 'shieldsafebank-api', time: new Date().toISOString() });
 });
 
+// Readiness probe used by the deployed admin console: resolves green only when
+// the API truly answers, so the offline banner cannot lie. Any error (network,
+// timeout, 5xx) surfaces as a failed probe.
+app.get('/api/admin/ping', adminMiddleware, (_, res) => {
+  res.json({ ok: true, time: new Date().toISOString() });
+});
+
 let db = loadDB();
 const tokens = new Map();
 const adminTokens = new Map();

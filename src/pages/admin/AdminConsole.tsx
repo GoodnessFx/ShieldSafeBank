@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
-import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, getAdminThreads, getAdminMessages, replyThread, markAdminThreadRead, verifyAdminUser } from '../../lib/api';
+import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, getAdminThreads, getAdminMessages, replyThread, markAdminThreadRead, verifyAdminUser, pingAdminServer, adminAuthExpired } from '../../lib/api';
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
 import BrandMark from '../../components/BrandMark';
@@ -58,6 +58,32 @@ export default function AdminConsole() {
   const [balanceInput, setBalanceInput] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
   const [serverOnline, setServerOnline] = useState(true);
+  const [authStale, setAuthStale] = useState(false);
+  const [syncNow, setSyncNow] = useState(false);
+
+  // If the shared server is reachable but the stored admin token is stale, the
+  // banner says RE-LOGIN (green fix: one click), never OFFLINE. Render free
+  // tier sleeps itself; the first probe each sitting is slow, so retry twice
+  // with patience instead of condemning the whole panel instantly.
+  async function checkServerLiveness(): Promise<{ online: boolean; auth: boolean }> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const probe = await pingAdminServer(attempt === 0 ? 12000 : 20000);
+      if (probe.online) {
+        setServerOnline(true);
+        setAuthStale(false);
+        return { online: true, auth: false };
+      }
+      if (probe.reason === 'auth' || adminAuthExpired()) {
+        setServerOnline(false);
+        setAuthStale(true);
+        return { online: false, auth: true };
+      }
+      if (attempt < 2) await new Promise(res => setTimeout(res, 4000));
+    }
+    setServerOnline(false);
+    setAuthStale(adminAuthExpired());
+    return { online: false, auth: adminAuthExpired() };
+  }
 
   async function reload() {
     // Everyone who has signed up locally, combined with anyone stored on the
@@ -65,10 +91,10 @@ export default function AdminConsole() {
     // only ones with a serverId so an admin edit can also apply server-side.
     const local = getUsers();
     let remote: AdminUserRow[] = [];
-    let online = false;
+    let live = await checkServerLiveness();
     try {
       const sr = await getAdminUsers();
-      online = sr.ok;
+      if (sr.ok) live = { online: true, auth: false };
       if (sr.ok && sr.data) {
         remote = sr.data.map(m => ({
           email: m.email,
@@ -85,7 +111,12 @@ export default function AdminConsole() {
     } catch {
       remote = [];
     }
-    setServerOnline(online);
+    // Liveness wins; if it was online but getAdminUsers died, treat as auth
+    // (server answered, token did not). If data actually landed, stay green.
+    setServerOnline(live.online);
+    setAuthStale(!live.online && (live.auth || adminAuthExpired()));
+    // Refuse to paint the local-thread fallback while unauthenticated: it is
+    // what makes a perfectly-healthy admin panel look like a dead one.
     const byEmail = new Map<string, AdminUserRow>();
     for (const r of remote) byEmail.set(r.email.toLowerCase(), r);
     for (const l of local) {
@@ -213,6 +244,10 @@ export default function AdminConsole() {
   function logout() { sessionStorage.removeItem('ssb_admin'); nav('/xk9-admin-console-7f3a'); }
 
   useEffect(() => { reload(); }, []);
+  useEffect(() => {
+    const id = setInterval(() => { reload().catch(() => null); }, 5000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     const id = setInterval(() => reload(), 5000);
@@ -259,9 +294,20 @@ export default function AdminConsole() {
         <div style={{ background: '#064E3B', borderBottom: '1px solid #10B981', padding: '8px 24px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#A7F3D0', textAlign: 'center', letterSpacing: '0.02em' }}>
           ● Shared server connected — showing everyone and everything from all devices.
         </div>
+      ) : authStale ? (
+        <div style={{ background: '#7C4A03', borderBottom: '1px solid #F59E0B', padding: '10px 24px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#FDE68A', textAlign: 'center' }}>
+          ⏳ Session expired — the shared server is UP, but this browser needs a fresh sign-in.{' '}
+          <button onClick={logout} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 700, color: '#0A2044', background: '#FDE68A', border: 'none', padding: '4px 12px', cursor: 'pointer' }}>
+            RE-LOGIN
+          </button>
+        </div>
       ) : (
         <div style={{ background: '#7F1D1D', borderBottom: '1px solid #DC2626', padding: '10px 24px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#FEE2E2', textAlign: 'center' }}>
-          ⚠ Offline — you can only see THIS browser's data. Start the shared server (<b>node server/index.js</b>) so everyone across all devices shows up, and verifying / editing works in every browser.
+          ⚠ Offline — you can only see THIS browser's data. The shared server at shieldsafebank-api.onrender.com is not answering right now (usually it is asleep and wakes on first try).{' '}
+          <button onClick={() => { setSyncNow(true); reload().finally(() => setSyncNow(false)); }}
+            style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 700, color: '#FEE2E2', background: 'transparent', border: '1px solid #FEE2E2', padding: '4px 12px', cursor: 'pointer' }}>
+            {syncNow ? 'RETRYING…' : 'RETRY NOW'}
+          </button>
         </div>
       )}
 

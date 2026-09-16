@@ -304,6 +304,18 @@ export async function markMyChatRead() {
 
 let adminToken = sessionStorage.getItem('ssb_admin_token') || '';
 
+/**
+ * Why the local fallback silently hijacks one healthy browser while working on
+ * others: a browser untouched for 15+ min holds an admin token issued before
+ * the free-tier host last restarted, so getAdminUsers dies with 401 "you are
+ * not logged in". The admin is genuinely awake on the shared server — only
+ * their local ticket is stale. Return the failure honestly so the console can
+ * say "re-login", not "offline".
+ */
+export function adminAuthExpired(): boolean {
+  return !adminToken && sessionStorage.getItem('ssb_admin') === '1';
+}
+
 function setAdminToken(t: string) {
   adminToken = t;
   sessionStorage.setItem('ssb_admin_token', t);
@@ -351,6 +363,27 @@ export async function adminLogin(email: string, password: string, totp = ''): Pr
 
 export async function getAdminUsers() {
   return adminFetch<{ id: string; name: string; email: string; status: string; balance: string; joined: string; lastLogin: string; kyc: string; accountNumber?: string }[]>('/admin/users');
+}
+
+// Authenticated liveness probe for the deployed console. Unlike the public
+// /api/health check it carries the admin token, so a 401 (expired token)
+// resolves honestly as a sign-in problem rather than as "the server is down".
+export async function pingAdminServer(timeoutMs = 20000): Promise<{ online: boolean; reason: 'ok' | 'auth' | 'offline' | 'error' }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
+    const res = await fetch(`${API_BASE}/admin/ping`, { headers, signal: controller.signal });
+    if (res.status === 401) return { online: false, reason: 'auth' };
+    if (res.status >= 200 && res.status < 300) return { online: true, reason: 'ok' };
+    const offlineish = res.status === 404 || res.status === 405 || res.status >= 500;
+    return { online: false, reason: offlineish ? 'offline' : 'error' };
+  } catch {
+    return { online: false, reason: 'offline' };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function getAdminKyc() {
