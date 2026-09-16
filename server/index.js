@@ -578,7 +578,7 @@ app.post('/api/withdrawals', authMiddleware, (req, res) => {
   const amt = parseFloat(amount);
   if (!amt || isNaN(amt) || amt <= 0) return res.status(400).json({ error:'Enter a valid amount.' });
   if (amt < 10) return res.status(400).json({ error:'Minimum withdrawal is $10.00.' });
-  if (amt > req.user.balance) return res.status(400).json({ error:`Amount exceeds your available balance of $${req.user.balance.toFixed(2)}.` });
+  if (amt > req.user.balance) return res.status(400).json({ error:`Amount exceeds your available balance of $${(req.user.balance || 0).toFixed(2)}.` });
   req.user.balance = Math.round((req.user.balance - amt) * 100) / 100;
   const tx = {
     id: nextId(db,'tx'), userId: req.user.id, date: new Date().toISOString().slice(0,10),

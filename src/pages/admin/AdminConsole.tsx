@@ -739,9 +739,9 @@ export default function AdminConsole() {
                           </div>
                         ) : (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end' }}>
-                            <span style={{ color: '#E5E7EB', fontWeight: 600 }}>${u.balance.toFixed(2)}</span>
+                            <span style={{ color: '#E5E7EB', fontWeight: 600 }}>${(u.balance || 0).toFixed(2)}</span>
                             <button
-                              onClick={() => { setEditingBalance(u.email); setBalanceInput(u.balance.toFixed(2)); }}
+                              onClick={() => { setEditingBalance(u.email); setBalanceInput((u.balance || 0).toFixed(2)); }}
                               style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#fff', background: '#4779C4', border: 'none', padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
                             >EDIT</button>
                           </div>

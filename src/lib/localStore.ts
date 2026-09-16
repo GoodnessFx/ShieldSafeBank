@@ -509,7 +509,7 @@ export function addWithdrawal(email: string, usd: number) {
   if (!user) return { ok: false, error: 'Account not found.' };
   if (!usd || isNaN(usd) || usd <= 0) return { ok: false, error: 'Enter a valid amount.' };
   if (usd < 10) return { ok: false, error: 'Minimum withdrawal is $10.00.' };
-  if (usd > user.balance) return { ok: false, error: `Amount exceeds your available balance of $${user.balance.toFixed(2)}.` };
+  if (usd > user.balance) return { ok: false, error: `Amount exceeds your available balance of $${(user.balance || 0).toFixed(2)}.` };
   user.balance = Math.round((user.balance - usd) * 100) / 100;
   users[oid] = user;
   write(USERS_KEY, users);
