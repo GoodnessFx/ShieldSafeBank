@@ -70,6 +70,11 @@ npm install
 DATABASE_URL="postgresql://..." node migrate-store.js ./data/store.json
 ```
 
+On Windows PowerShell that is `$env:DATABASE_URL="postgresql://..."; node migrate-store.js ./data/store.json`.
+Alternatively drop `DATABASE_URL=postgresql://...` into a **git-ignored**
+`server/.env` and run `node migrate-store.js` — the script reads that file when
+the variable is not already set, so the URI never lands in your shell history.
+
 If the live Render process still has chats that never made it to disk (common
 on the free tier), pull them from the running API as well:
 
