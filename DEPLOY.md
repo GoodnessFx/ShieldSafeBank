@@ -39,11 +39,40 @@ browser only. When that person next opens the app **and the backend is
 reachable**, those messages upload automatically and appear in the admin
 Chat Inbox. Nothing needs to be done by hand.
 
+## 4. Local server fallback
+
+If the configured backend cannot be reached, the API layer automatically retries
+each request against `http://localhost:4000/api` (`LOCAL_API_BASE` in
+`src/lib/config.ts`). That keeps chats, users and balances shared between every
+browser — including incognito windows, which have their own separate
+`localStorage` — instead of silently degrading to per-browser storage. It only
+helps when `node server/index.js` is actually running.
+
+Admins can answer one conversation at a time or use **Reply to All** in the Chat
+Inbox to broadcast a single message to every open thread
+(`POST /api/admin/threads/reply-all`).
+
 ## Local development
 
+Start the shared server **first** (it is what makes every browser see the same
+data), then the app:
+
 ```
-npm start
+node server/index.js        # shared backend on http://localhost:4000
+npm run start:dev           # Vite dev server on http://localhost:8443
 ```
 
-Starts both the app (http://localhost:8443) and the shared server
-(http://localhost:4000).
+`npm run start:dev` proxies `/api` → `http://localhost:4000`, but it does not
+start the backend itself. `npm start` only serves the prebuilt `dist/` folder
+through `node start.mjs` and does not provide an API either.
+
+To use the production build locally:
+
+```
+npm run build
+npm start                   # serves dist/ on http://localhost:3000
+```
+
+On localhost the app calls `/api`, which `node start.mjs` does not proxy; the
+API layer's localhost fallback then reaches `http://localhost:4000/api`
+directly, so the shared server must still be running.

@@ -20,11 +20,24 @@ React + Vite + Tailwind CSS project running inside Figma Make.
 ### Local development
 
 - `npm start` → runs `node start.mjs` (serves the built `dist/`)
-- `npm run start:dev` → Vite dev server (auto-runs the shared backend too via
-  the `/api` dev proxy only when it is running locally)
+- `npm run start:dev` → Vite dev server. It does **not** start the backend; it
+  only proxies `/api` → `localhost:4000`, so the shared server must already be
+  running for chats/users/balances to be shared.
 - `npm run build` → production build into `dist/`
 - Shared server locally: `node server/index.js` (needs `server/node_modules`,
   install via `pnpm install` inside `server/`)
+
+**Always start the shared server when testing chats.** With it down every
+request fails and the app falls back to per-browser `localStorage`, which is
+isolated between a normal window and an incognito window — so a chat written in
+one browser never appears in the other. `src/lib/api.ts` now retries failed
+requests against `LOCAL_API_BASE` (`http://localhost:4000/api`, see
+`src/lib/config.ts`), so the app still works when the hosted backend is
+unreachable, but only if that local server is actually running.
+
+Admins can reply to a single conversation or use **Reply to All** in the Chat
+Inbox to broadcast one message to every open thread
+(`POST /api/admin/threads/reply-all`).
 
 Admin console: `/xk9-admin-console-7f3a` (login `admin@shieldsafebank.com` /
 `admin1234`).
