@@ -582,18 +582,80 @@ app.post('/api/support/message', (req, res) => {
 /** Finds (or creates) the shared chat thread for the signed-in user. Stored in
  * the same server database the admin console reads, so a customer on any device
  * reaches the admin, and admin replies follow the customer back. */
+function findThreadByEmail(email) {
+  const e = String(email || '').toLowerCase();
+  if (!e) return null;
+  return (db.threads || []).find(t => String(t.email || '').toLowerCase() === e);
+}
+
+/** One email = one chat, no matter the account id or letter case. A thread can
+ * only ever belong to a single userId, so re-signing in (even on a fresh
+ * device) reuses the same conversation instead of opening a second one. */
 function ensureUserThread(user) {
-  let thread = (db.threads || []).find(t => t.userId === user.id);
+  let thread = (db.threads || []).find(t => t.userId === user.id)
+    || findThreadByEmail(user.email);
   if (!thread) {
     thread = {
       id: nextId(db, 'thread'), userId: user.id, user: user.name || user.email,
       email: user.email, preview: '', time: '', at: new Date().toISOString(), unread: false,
     };
     db.threads.push(thread);
+    saveDB(db);
+  } else if (thread.userId !== user.id) {
+    // Re-bind to the current account so future reads/writes on this device
+    // keep using the same single conversation.
+    thread.userId = user.id;
+    saveDB(db);
   }
   if (thread.user !== (user.name || user.email)) { thread.user = user.name || user.email; }
-  if (thread.email !== user.email) { thread.email = user.email; }
+  if (String(thread.email || '').toLowerCase() !== String(user.email || '').toLowerCase()) { thread.email = user.email; }
   return thread;
+}
+
+/** Moves every message that lives under `fromId` (deduped on text, so identical
+ * messages never double up) into `toId`, then drops the now-empty slot. */
+function mergeThreadMessages(store, fromId, toId) {
+  const from = store.messages[fromId] || [];
+  const to = store.messages[toId] || [];
+  if (from.length > 0) {
+    const seen = new Set(to.map(m => m.text));
+    const extra = from.filter(m => !seen.has(m.text));
+    if (extra.length > 0) {
+      store.messages[toId] = to.concat(extra)
+        .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
+    }
+  }
+  delete store.messages[fromId];
+}
+
+/** Collapses duplicate threads for the same account (same case-insensitive email
+ * or same user id) into a single conversation so the admin never sees two chats
+ * for one person. Idempotent and safe to run on every boot. Returns the number
+ * of duplicate threads removed. */
+function dedupeThreads(store) {
+  const threads = store.threads || [];
+  const kept = new Map();
+  const remove = new Set();
+  let removed = 0;
+  for (const t of threads) {
+    const key = String(t.email || '').toLowerCase() || String(t.userId || '');
+    if (!key) { continue; }
+    if (!kept.has(key)) { kept.set(key, t); continue; }
+    const base = kept.get(key);
+    const baseTime = base.at || base.time || '';
+    const hereTime = t.at || t.time || '';
+    if (hereTime > baseTime) {
+      mergeThreadMessages(store, base.id, t.id);
+      kept.set(key, t);
+      remove.add(base.id);
+    } else {
+      mergeThreadMessages(store, t.id, base.id);
+      remove.add(t.id);
+    }
+    removed += 1;
+  }
+  if (removed > 0) store.threads = threads.filter(t => !remove.has(t.id));
+  return removed;
 }
 
 app.get('/api/chat/thread', authMiddleware, (req, res) => {
@@ -851,6 +913,10 @@ app.post('/api/admin/login', (req, res) => {
 let server;
 async function main() {
   db = await loadDB();
+  // One email = one chat: merge any stray duplicate conversations that built up
+  // in earlier versions so the admin inbox never shows two chats for one person.
+  const removed = dedupeThreads(db);
+  if (removed > 0) { console.log(`  Merged ${removed} duplicate chat thread(s).`); await saveDB(db); }
   server = app.listen(PORT, () => {
     console.log(`\n  Shield Safe Bank demo server running on http://localhost:${PORT}\n`);
     console.log(`  Storage: ${pool ? 'Postgres (DATABASE_URL)' : 'local store.json'}`);

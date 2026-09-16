@@ -7,6 +7,7 @@
  * alone; every component keeps using the same subscribe() contract.
  */
 import { getToken } from './api';
+import { API_BASE } from './config';
 
 export interface LiveMessage {
   id: string;
@@ -37,7 +38,11 @@ let currentListener: Listener | null = null;
 let currentRole: 'user' | 'admin' | null = null;
 
 function streamUrl(role: 'user' | 'admin'): string {
-  const base = role === 'admin' ? `${window.location.origin}/api/admin/chat/stream` : `${window.location.origin}/api/chat/stream`;
+  // The stream must hit the same backend as the REST calls (API_BASE), not the
+  // frontend origin: when the app is deployed as a static site there is no /api
+  // proxy on its own host, so using window.location.origin here would silently
+  // kill realtime and leave only the 5s polling fallback.
+  const base = role === 'admin' ? `${API_BASE}/admin/chat/stream` : `${API_BASE}/chat/stream`;
   const t = role === 'admin' ? localStorage.getItem('ssb_admin_token') || '' : getToken();
   return `${base}?token=${encodeURIComponent(t)}`;
 }

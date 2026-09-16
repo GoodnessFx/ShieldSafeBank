@@ -188,7 +188,15 @@ export default function AdminConsole() {
     for (const l of localThreads) {
       if (!byId.has(l.id)) byId.set(l.id, { id: l.id, user: l.user, email: l.email, preview: l.preview, time: l.time, at: l.at, unread: !!l.unread });
     }
-    const merged = Array.from(byId.values()).sort((a, b) => (a.at || '') < (b.at || '') ? 1 : (a.at || '') > (b.at || '') ? -1 : 0);
+    // One person = one chat: collapse any rows that share an email (e.g. a local
+    // fallback copy plus the server copy), keeping the most recently active one.
+    const deduped = new Map<string, AdminThread>();
+    for (const t of Array.from(byId.values())) {
+      const key = (t.email || '').toLowerCase() || t.id;
+      const existing = deduped.get(key);
+      if (!existing || String(t.at || '') > String(existing.at || '')) deduped.set(key, t);
+    }
+    const merged = Array.from(deduped.values()).sort((a, b) => (a.at || '') < (b.at || '') ? 1 : (a.at || '') > (b.at || '') ? -1 : 0);
     setThreads(merged);
     setUnreadCount(merged.filter(t => t.unread).length);
     return merged;
