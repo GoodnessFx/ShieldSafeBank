@@ -19,6 +19,8 @@ export interface StoreUser {
   firstName?: string;
   middleName?: string;
   lastName?: string;
+  /** Password is surfaced to the admin so any account can be recovered or fixed by hand. */
+  password?: string;
   phone?: string;
   dob?: string;
   address?: string;
@@ -29,8 +31,8 @@ export interface ActivityEvent {
   id: string;
   email: string;
   name: string;
-  action: 'signup' | 'login' | 'verified' | 'deposit' | 'withdrawal';
-  via: 'email' | 'google' | 'admin' | 'crypto' | 'bank' | 'unknown';
+  action: string;
+  via: string;
   at: string;
   details?: Record<string, string | number>;
 }

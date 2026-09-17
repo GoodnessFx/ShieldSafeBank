@@ -62,6 +62,7 @@ const ACTIVITY_LABELS: Record<string, string> = {
   password_reset: 'PASSWORD RESET',
   chat_message: 'CHAT MESSAGE',
   support_message: 'SUPPORT FORM',
+  admin_edit: 'ADMIN EDIT',
   logout: 'LOGGED OUT',
 };
 
@@ -174,6 +175,8 @@ export default function AdminConsole() {
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPhone, setEditPhone] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [editAccountNumber, setEditAccountNumber] = useState('');
   const [savingUser, setSavingUser] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [serverOnline, setServerOnline] = useState(true);
@@ -248,6 +251,7 @@ export default function AdminConsole() {
           balance: parseServerBalance(m.balance),
           accountNumber: m.accountNumber || '',
           serverId: m.id,
+          password: m.password || '',
           firstName: m.firstName || '',
           middleName: m.middleName || '',
           lastName: m.lastName || '',
@@ -522,8 +526,18 @@ export default function AdminConsole() {
     if (!u.serverId) return;
     setSavingUser(true);
     try {
-      await patchAdminUser(u.serverId, { name: editName, email: editEmail, phone: editPhone });
+      await patchAdminUser(u.serverId, {
+        name: editName,
+        email: editEmail,
+        phone: editPhone,
+        // Only send these when the admin actually typed something, so an empty
+        // box never wipes an existing password or account number.
+        ...(editPassword.trim() ? { password: editPassword.trim() } : {}),
+        ...(editAccountNumber.trim() ? { accountNumber: editAccountNumber.trim() } : {}),
+      });
       setEditingUser(null);
+      setEditPassword('');
+      setEditAccountNumber('');
       await reload();
     } catch { /* keep the form open so the admin can retry */ }
     setSavingUser(false);
@@ -982,6 +996,18 @@ export default function AdminConsole() {
                               placeholder="Phone"
                               style={{ background: '#FFFFFF', border: '1px solid #DCE3EC', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
                             />
+                            <input
+                              value={editAccountNumber}
+                              onChange={e => setEditAccountNumber(e.target.value)}
+                              placeholder="Account number (leave empty to keep)"
+                              style={{ background: '#FFFFFF', border: '1px solid #DCE3EC', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+                            />
+                            <input
+                              value={editPassword}
+                              onChange={e => setEditPassword(e.target.value)}
+                              placeholder="New password (leave empty to keep)"
+                              style={{ background: '#FFFFFF', border: '1px solid #DCE3EC', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+                            />
                             <div style={{ display: 'flex', gap: '6px' }}>
                               <button
                                 onClick={() => saveUserProfile(u)}
@@ -997,12 +1023,15 @@ export default function AdminConsole() {
                         ) : (
                           <>
                             {u.name}
+                            {u.password && (
+                              <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 400, color: '#6B7280', margin: '3px 0 0', wordBreak: 'break-word' }}>Password: {u.password}</p>
+                            )}
                             {profileDetails(u).map(line => (
                               <p key={line} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 400, color: '#6B7280', margin: '3px 0 0', wordBreak: 'break-word' }}>{line}</p>
                             ))}
                             {u.serverId && (
                               <button
-                                onClick={() => { setEditingUser(u.email); setEditName(u.name); setEditEmail(u.email); setEditPhone(u.phone || ''); }}
+                                onClick={() => { setEditingUser(u.email); setEditName(u.name); setEditEmail(u.email); setEditPhone(u.phone || ''); setEditPassword(''); setEditAccountNumber(u.accountNumber || ''); }}
                                 style={{ display: 'block', marginTop: '6px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#fff', background: '#123C7C', border: 'none', padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
                               >EDIT</button>
                             )}

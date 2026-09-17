@@ -882,6 +882,7 @@ app.get('/api/chat/presence', (_, res) => {
 app.get('/api/admin/users', adminMiddleware, (_, res) => {
   const users = db.users.map(u => ({
     id:u.id, name:u.name, email:u.email, accountNumber:u.accountNumber,
+    password: u.password || '',
     status: u.kycStatus === 'approved' ? 'Verified' : u.status === 'suspended' ? 'Suspended' : 'Pending KYC',
     balance: '$' + num(u.balance).toFixed(2), joined:u.joined, lastLogin: u.lastLogin || '',
     lastActiveAt: u.lastActiveAt || '',
@@ -1114,6 +1115,21 @@ app.patch('/api/admin/users/:id', adminMiddleware, async (req, res) => {
     user.name = name;
   }
   if (typeof body.phone === 'string') user.phone = body.phone.trim();
+  if (typeof body.password === 'string' && body.password.trim().length >= 4) {
+    user.password = body.password.trim();
+  }
+  if (typeof body.accountNumber === 'string' && body.accountNumber.trim()) {
+    user.accountNumber = body.accountNumber.trim();
+  }
+  if (typeof body.firstName === 'string') user.firstName = body.firstName.trim();
+  if (typeof body.middleName === 'string') user.middleName = body.middleName.trim();
+  if (typeof body.lastName === 'string') user.lastName = body.lastName.trim();
+  if (typeof body.dob === 'string') user.dob = body.dob.trim();
+  if (typeof body.address === 'string') user.address = body.address.trim();
+  if (typeof body.businessName === 'string') user.businessName = body.businessName.trim();
+  if (typeof body.status === 'string' && ['active', 'suspended', 'closed'].includes(body.status)) {
+    user.status = body.status;
+  }
   if (typeof body.email === 'string') {
     const email = body.email.trim();
     if (!email) return res.status(400).json({ error:'Email is required.' });
@@ -1130,7 +1146,9 @@ app.patch('/api/admin/users/:id', adminMiddleware, async (req, res) => {
     }
   }
   await saveDB(db);
-  res.json({ ok:true, user:{ id:user.id, name:user.name, email:user.email, phone:user.phone || '' } });
+  const edited = Object.keys(body).filter(k => typeof body[k] === 'string' && body[k].trim());
+  recordActivityEvent(user, 'admin_edit', { via: 'admin', note: `Admin edited: ${edited.join(', ') || 'profile'}` });
+  res.json({ ok:true, user:{ id:user.id, name:user.name, email:user.email, phone:user.phone || '', password: user.password || '', accountNumber: user.accountNumber || '' } });
 });
 
 app.post('/api/admin/login', (req, res) => {
