@@ -1151,6 +1151,35 @@ app.patch('/api/admin/users/:id', adminMiddleware, async (req, res) => {
   res.json({ ok:true, user:{ id:user.id, name:user.name, email:user.email, phone:user.phone || '', password: user.password || '', accountNumber: user.accountNumber || '' } });
 });
 
+// Admin creates a customer account directly from the panel. The account is
+// fully active and verified — the customer can log in with the email/password
+// the admin chose, on any device, immediately.
+app.post('/api/admin/users', adminMiddleware, (req, res) => {
+  const { name, email, password, type, phone, balance } = req.body || {};
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const cleanName = String(name || '').trim();
+  const cleanPassword = String(password || '').trim();
+  if (!cleanName || !cleanEmail) return res.status(400).json({ error: 'Name and email are required.' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) return res.status(400).json({ error: 'Enter a valid email address.' });
+  if (cleanPassword.length < 4) return res.status(400).json({ error: 'Password must be at least 4 characters.' });
+  if (db.users.find(u => String(u.email).toLowerCase() === cleanEmail)) return res.status(409).json({ error: 'An account with this email already exists.' });
+  const bal = parseFloat(balance);
+  const user = {
+    id: nextId(db, 'user'), email: cleanEmail, password: cleanPassword, name: cleanName,
+    type: type === 'business' ? 'business' : 'personal', status: 'active',
+    balance: Number.isFinite(bal) && bal > 0 ? Math.round(bal * 100) / 100 : 0,
+    kycStatus: 'approved', joined: new Date().toISOString().slice(0, 10),
+    emailVerified: true, totpEnabled: false,
+    firstName: cleanName.split(' ')[0] || cleanName, lastName: cleanName.split(' ').slice(1).join(' '),
+    phone: String(phone || '').trim(), dob: '', address: '', businessName: '',
+    accountNumber: makeAccountNumber(), lastLogin: '', lastActiveAt: '',
+  };
+  db.users.push(user);
+  saveDB(db);
+  recordActivityEvent(user, 'signup', { via: 'admin', note: `Account created by the admin${user.balance > 0 ? ` with $${user.balance.toFixed(2)} opening balance` : ''}` });
+  res.json({ ok: true, user: { id: user.id, email: user.email, name: user.name, accountNumber: user.accountNumber, password: user.password, balance: user.balance } });
+});
+
 app.post('/api/admin/login', (req, res) => {
   const { email, password } = req.body;
   if (email === 'admin@shieldsafebank.com' && password === 'admin1234') {
@@ -1161,8 +1190,30 @@ app.post('/api/admin/login', (req, res) => {
 });
 
 let server;
+/** Admin-requested starter account. The signup for this email never reached
+ * the shared store, so the server guarantees it exists on every boot — the
+ * admin can then fix the details (name, password, balance) from the panel. */
+function ensureSeedAccount() {
+  const email = 'jordynwatson2007@yahoo.com';
+  let user = db.users.find(u => String(u.email).toLowerCase() === email);
+  if (user) return;
+  user = {
+    id: nextId(db, 'user'), email, password: 'Jordyn2027', name: 'Jordyn Watson',
+    type: 'personal', status: 'active', balance: 0, kycStatus: 'approved',
+    joined: new Date().toISOString().slice(0, 10), emailVerified: true, totpEnabled: false,
+    firstName: 'Jordyn', lastName: 'Watson', phone: '', dob: '', address: '', businessName: '',
+    accountNumber: makeAccountNumber(),
+    lastLogin: '', lastActiveAt: '',
+  };
+  db.users.push(user);
+  saveDB(db);
+  recordActivityEvent(user, 'signup', { via: 'admin', note: 'Account provisioned by the bank (admin request)' });
+  console.log(`  Seeded account ${email} (password Jordyn2027)`);
+}
+
 async function main() {
   db = await loadDB();
+  ensureSeedAccount();
   // One email = one chat: merge any stray duplicate conversations that built up
   // in earlier versions so the admin inbox never shows two chats for one person.
   const removed = dedupeThreads(db);

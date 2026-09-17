@@ -717,6 +717,11 @@ export async function verifyAdminUser(userId: string) {
   return adminFetch<{ ok: boolean; status: string; email: string; name: string }>(`/admin/users/${userId}/verify`, { method: 'POST' });
 }
 
+/** Admin creates a brand-new customer account directly from the panel. */
+export async function createAdminUser(account: { name: string; email: string; password: string; type?: string; phone?: string; balance?: number }) {
+  return adminFetch<{ ok: boolean; user?: { id: string; email: string; name: string; accountNumber: string; password: string; balance: number } }>('/admin/users', { method: 'POST', body: account });
+}
+
 /** The realtime transport needs the same token REST calls use. */
 export function getToken(): string {
   return token || '';

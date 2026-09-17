@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
-import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, getAdminActivity, type AdminLoginEvent } from '../../lib/api';
+import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, createAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, getAdminActivity, type AdminLoginEvent } from '../../lib/api';
 import { subscribeToChat, closeChatStream, type ChatEvent } from '../../lib/chatTransport';
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
@@ -155,6 +155,12 @@ function ReadTicks({ read, onDark }: { read?: boolean; onDark?: boolean }) {
   );
 }
 
+/** Shared style for the add-customer form inputs. */
+const addInputStyle: React.CSSProperties = {
+  flex: '1 1 180px', background: '#FFFFFF', border: '1px solid #DCE3EC', borderRadius: '8px',
+  padding: '8px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none',
+};
+
 export default function AdminConsole() {
   const nav = useNavigate();
   const [tab, setTab] = useState<Tab>('chat');
@@ -177,6 +183,11 @@ export default function AdminConsole() {
   const [editPhone, setEditPhone] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [editAccountNumber, setEditAccountNumber] = useState('');
+  // Add-customer form: lets an admin open a brand-new account from the panel.
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState({ name: '', email: '', password: '', type: 'personal', phone: '', balance: '' });
+  const [addError, setAddError] = useState('');
+  const [addBusy, setAddBusy] = useState(false);
   const [savingUser, setSavingUser] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [serverOnline, setServerOnline] = useState(true);
@@ -520,6 +531,36 @@ export default function AdminConsole() {
     if (u.serverId) setAdminUserBalance(u.serverId, val).catch(() => null);
     updateUserBalance(u.email, val);
     reload();
+  }
+
+  async function createAccount() {
+    setAddError('');
+    const bal = parseFloat(addForm.balance);
+    if (!addForm.name.trim() || !addForm.email.trim() || addForm.password.trim().length < 4) {
+      setAddError('Name, email and a password of at least 4 characters are required.');
+      return;
+    }
+    setAddBusy(true);
+    try {
+      const r = await createAdminUser({
+        name: addForm.name.trim(),
+        email: addForm.email.trim(),
+        password: addForm.password.trim(),
+        type: addForm.type,
+        phone: addForm.phone.trim(),
+        balance: Number.isFinite(bal) ? bal : 0,
+      });
+      if (!r.ok || (r.data && (r.data as { error?: string }).error)) {
+        setAddError((r.data as { error?: string })?.error || 'Could not create the account.');
+      } else {
+        setAddOpen(false);
+        setAddForm({ name: '', email: '', password: '', type: 'personal', phone: '', balance: '' });
+        await reload();
+      }
+    } catch {
+      setAddError('Could not reach the server. Try again.');
+    }
+    setAddBusy(false);
   }
 
   async function saveUserProfile(u: AdminUserRow) {
@@ -952,7 +993,7 @@ export default function AdminConsole() {
         {/* Users */}
         {tab === 'users' && (
           <div style={{ border: '1px solid #DCE3EC', borderRadius: '12px', background: '#FFFFFF', overflow: 'hidden' }}>
-            <div style={{ padding: '12px 16px', borderBottom: '1px solid #DCE3EC' }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid #DCE3EC', display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', justifyContent: 'space-between' }}>
               <input
                 value={userSearch}
                 onChange={e => setUserSearch(e.target.value)}
@@ -960,7 +1001,42 @@ export default function AdminConsole() {
                 aria-label="Search users"
                 style={{ width: '100%', maxWidth: '320px', background: '#FFFFFF', border: '1px solid #DCE3EC', borderRadius: '8px', padding: '8px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
               />
+              <button
+                onClick={() => { setAddOpen(o => !o); setAddError(''); }}
+                style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, letterSpacing: '0.04em', color: '#fff', background: '#123C7C', border: 'none', borderRadius: '8px', padding: '8px 14px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+              >
+                {addOpen ? '✕ CLOSE' : '+ ADD CUSTOMER'}
+              </button>
             </div>
+            {addOpen && (
+              <div style={{ padding: '14px 16px', borderBottom: '1px solid #DCE3EC', background: '#F8FAFD', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <p style={{ margin: 0, fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '13px', color: '#0A2044' }}>
+                  Open a new customer account — the customer can log in immediately with these details
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  <input value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} placeholder="Full name *"
+                    style={addInputStyle} />
+                  <input value={addForm.email} onChange={e => setAddForm(f => ({ ...f, email: e.target.value }))} placeholder="Email *"
+                    style={addInputStyle} />
+                  <input value={addForm.password} onChange={e => setAddForm(f => ({ ...f, password: e.target.value }))} placeholder="Password * (min 4)"
+                    style={addInputStyle} />
+                  <input value={addForm.phone} onChange={e => setAddForm(f => ({ ...f, phone: e.target.value }))} placeholder="Phone"
+                    style={addInputStyle} />
+                  <input value={addForm.balance} onChange={e => setAddForm(f => ({ ...f, balance: e.target.value }))} placeholder="Opening balance $" type="number" min="0" step="0.01"
+                    style={{ ...addInputStyle, maxWidth: '160px' }} />
+                  <select value={addForm.type} onChange={e => setAddForm(f => ({ ...f, type: e.target.value }))}
+                    style={{ ...addInputStyle, maxWidth: '130px' }}>
+                    <option value="personal">Personal</option>
+                    <option value="business">Business</option>
+                  </select>
+                  <button onClick={createAccount} disabled={addBusy}
+                    style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: addBusy ? '#6B7280' : '#1E7A4C', border: 'none', borderRadius: '8px', padding: '8px 16px', cursor: addBusy ? 'default' : 'pointer', whiteSpace: 'nowrap' }}>
+                    {addBusy ? 'CREATING…' : 'CREATE ACCOUNT'}
+                  </button>
+                </div>
+                {addError && <p style={{ margin: 0, fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#DC2626' }}>{addError}</p>}
+              </div>
+            )}
             {users.length === 0 ? (
               <div style={{ padding: '60px', textAlign: 'center', fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#374151' }}>
                 No users yet. Anyone who signs up or logs in will show up here.
