@@ -710,7 +710,14 @@ export default function AdminConsole() {
           .admin-chat { display: block !important; height: auto !important; }
           .admin-convo { display: none !important; }
           .admin-chat.admin-chat-open .admin-threads { display: none !important; }
-          .admin-chat.admin-chat-open .admin-convo { display: flex !important; }
+          /* Bounded height so the reply composer (input + SEND) stays pinned
+             to the bottom of the screen instead of being pushed out of view. */
+          .admin-chat.admin-chat-open .admin-convo {
+            display: flex !important;
+            height: calc(100vh - 230px) !important;
+            min-height: 380px !important;
+            overflow: hidden !important;
+          }
           .admin-tabs { overflow-x: auto !important; padding: 0 12px !important; }
           .admin-main { padding: 14px 12px !important; }
         }
@@ -970,7 +977,7 @@ export default function AdminConsole() {
                   </div>
                 )}
               </div>
-              <div style={{ borderTop: '1px solid #DCE3EA', padding: '12px 16px', display: 'flex', gap: '10px', position: 'relative' }}>
+              <div style={{ borderTop: '1px solid #DCE3EA', padding: '12px 16px', display: 'flex', gap: '10px', position: 'relative', flexShrink: 0 }}>
                 {emojiOpen && (
                   <div style={{ position: 'absolute', bottom: '100%', left: '10px', marginBottom: '6px', background: '#fff', border: '1px solid #DCE3EA', boxShadow: '0 4px 16px rgba(10,32,68,0.12)', padding: '8px', display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: '3px', zIndex: 3 }} role="dialog" aria-label="Choose an emoji">
                     {CHAT_EMOJIS.map(e => (

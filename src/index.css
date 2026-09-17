@@ -127,6 +127,14 @@ body {
     grid-template-columns: 1fr !important;
     height: auto !important;
   }
+  /* Keep the conversation a fixed-height panel so the reply composer
+     (emoji / input / SEND) is always visible at the bottom. */
+  .admin-chat.admin-chat-open .admin-convo {
+    display: flex !important;
+    height: calc(100vh - 230px) !important;
+    min-height: 380px !important;
+    overflow: hidden !important;
+  }
 }
 
 /* Admin tab nav: scroll on narrow screens */
