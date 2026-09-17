@@ -105,6 +105,18 @@ async function apiFetch<T>(path: string, opts?: { method?: string; body?: unknow
   return tryFetch<T>(LOCAL_API_BASE, path, token || '', clearToken, opts);
 }
 
+/** Fire-and-forget report of a customer action only the browser knows about
+ * (tapping "Scan my card", opening the deposit form, logging out, …) so the
+ * admin Activity feed records every single click. Never throws. */
+export function trackUserActivity(action: string, details: Record<string, unknown> = {}) {
+  try {
+    if (!token || token === 'local') return;
+    void apiFetch('/activity', { method: 'POST', body: { action, details } }).catch(() => null);
+  } catch {
+    // tracking must never break the app
+  }
+}
+
 export interface MeData {
   id: string;
   email: string;

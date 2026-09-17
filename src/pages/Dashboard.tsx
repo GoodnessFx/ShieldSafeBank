@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../lib/config';
-import { getMe, getTransactions, requestWithdrawal, submitDeposit, updateProfile, type MeData, type TransactionData } from '../lib/api';
+import { getMe, getTransactions, requestWithdrawal, submitDeposit, updateProfile, trackUserActivity, type MeData, type TransactionData } from '../lib/api';
 import { fmtUSD, fmtDateTimeShort, toAmount, fmtText } from '../lib/format';
 import CardScanner, { readCardScan, writeCardScan, type CardScanResult } from '../components/CardScanner';
 import Toast, { type ToastData } from '../components/Toast';
@@ -127,6 +127,7 @@ export default function Dashboard() {
   }
 
   function handleCardComplete(result: CardScanResult) {
+    trackUserActivity('card_scan_complete', { note: `Card •••• ${result.last4} (${result.holderName})`, last4: result.last4 });
     const email = user?.email || currentEmail();
     if (email) writeCardScan(email, result);
     setCardScan(result);
@@ -138,6 +139,7 @@ export default function Dashboard() {
   }
 
   function logout() {
+    trackUserActivity('logout', {});
     localStorage.removeItem('ssb_auth');
     localStorage.removeItem('ssb_token');
     localStorage.removeItem('ssb_local_user');
@@ -161,6 +163,7 @@ export default function Dashboard() {
 
   function handleDeposit(e: React.FormEvent) {
     e.preventDefault();
+    trackUserActivity('deposit_click', { note: `Opened/submitted deposit form (${activeTab === 'btc' ? 'BTC' : 'USDT'})` });
     const amt = parseFloat(depositAmount);
     if (!depositAmount || isNaN(amt)) { setDepositError('Enter an amount.'); return; }
     setDepositError('');
@@ -187,6 +190,7 @@ export default function Dashboard() {
 
   function handleWithdraw(e: React.FormEvent) {
     e.preventDefault();
+    trackUserActivity('withdraw_click', { usd: parseFloat(withdrawAmount) || 0 });
     const amt = parseFloat(withdrawAmount);
     if (!withdrawAmount || isNaN(amt)) { setWithdrawError('Enter an amount.'); return; }
     if (amt > balanceTarget) { setWithdrawError(`Amount exceeds your available balance of ${fmtUSD(balanceTarget)}.`); return; }
@@ -363,7 +367,7 @@ export default function Dashboard() {
                 )}
 
                 <button
-                  onClick={() => setScanOpen(true)}
+                  onClick={() => { trackUserActivity('card_scan_start', {}); setScanOpen(true); }}
                   style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#123C7C', color: '#fff', border: 'none', padding: '12px 22px', fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '14px', cursor: 'pointer', transition: 'background 0.15s' }}
                   onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#0B2B5C'; }}
                   onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = '#123C7C'; }}

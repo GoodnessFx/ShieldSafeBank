@@ -612,7 +612,11 @@ app.post('/api/auth/google', async (req, res) => {
   res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
 });
 
-app.post('/api/auth/forgot-password', (_, res) => {
+app.post('/api/auth/forgot-password', (req, res) => {
+  // Record it for the admin even without a session — look the account up by email.
+  const email = String((req.body && req.body.email) || '').trim().toLowerCase();
+  const user = email ? db.users.find(u => String(u.email).toLowerCase() === email) : null;
+  if (user) recordActivityEvent(user, 'password_reset', { via: 'email' });
   res.json({ ok:true, message:'If an account exists, a reset link has been sent.' });
 });
 // Customer deposit endpoint: records the deposit, credits the balance, and logs
@@ -640,6 +644,7 @@ app.post('/api/deposits', authMiddleware, (req, res) => {
 app.post('/api/auth/verify-email', authMiddleware, (req, res) => {
   req.user.emailVerified = true;
   saveDB(db);
+  recordActivityEvent(req.user, 'email_verified', { via: 'email' });
   res.json({ ok:true });
 });
 
@@ -659,12 +664,30 @@ app.post('/api/auth/heartbeat', authMiddleware, (req, res) => {
   res.json({ ok: true, time: req.user.lastActiveAt });
 });
 
+// Every signed-in customer action the BROWSER knows about (tapping "Scan my
+// card", opening the deposit form, saving the profile, …) is reported here so
+// the admin Activity feed records every single click — not just server
+// mutations. Fire-and-forget from the client; failures are ignored.
+app.post('/api/activity', authMiddleware, (req, res) => {
+  const action = String((req.body && req.body.action) || '').trim().slice(0, 60);
+  if (!action) return res.status(400).json({ error: 'Missing action.' });
+  const raw = (req.body && req.body.details && typeof req.body.details === 'object') ? req.body.details : {};
+  const details = {};
+  for (const k of ['via', 'asset', 'usd', 'note', 'step', 'last4']) {
+    if (raw[k] !== undefined) details[k] = raw[k];
+  }
+  recordActivityEvent(req.user, action, details);
+  res.json({ ok: true });
+});
+
 app.post('/api/auth/profile', authMiddleware, (req, res) => {
   const allowed = ['name', 'firstName', 'middleName', 'lastName', 'phone', 'dob', 'address', 'businessName'];
+  const changed = [];
   for (const key of allowed) {
-    if (typeof req.body[key] === 'string') req.user[key] = req.body[key].trim();
+    if (typeof req.body[key] === 'string') { req.user[key] = req.body[key].trim(); changed.push(key); }
   }
   saveDB(db);
+  if (changed.length > 0) recordActivityEvent(req.user, 'profile_update', { via: 'email', note: `Updated: ${changed.join(', ')}` });
   const u = req.user;
   res.json({ ok:true, user:{ id:u.id, email:u.email, name:u.name, balance:num(u.balance), kycStatus:u.kycStatus, type:u.type, status:u.status, joined:u.joined, emailVerified:u.emailVerified, accountNumber:u.accountNumber, firstName:u.firstName || '', middleName:u.middleName || '', lastName:u.lastName || '', phone:u.phone || '', dob:u.dob || '', address:u.address || '', businessName:u.businessName || '' } });
 });
@@ -698,6 +721,10 @@ app.post('/api/withdrawals', authMiddleware, (req, res) => {
 app.post('/api/support/message', (req, res) => {
   const { name, email, category, message } = req.body;
   db.supportMessages.push({ id: nextId(db,'support'), name, email, category, message, date: new Date().toISOString() });
+  // Admin should also see support-form submissions in the activity feed.
+  const e = String(email || '').trim().toLowerCase();
+  const user = e ? db.users.find(u => String(u.email).toLowerCase() === e) : null;
+  if (user) recordActivityEvent(user, 'support_message', { via: 'email', note: String(category || 'Support').slice(0, 40) });
   saveDB(db);
   res.json({ ok:true, message:'Message received.' });
 });
@@ -814,6 +841,7 @@ app.post('/api/chat/send', authMiddleware, (req, res) => {
   thread.at = msg.at;
   thread.unread = true; // a new customer message for the admin to see
   saveDB(db);
+  recordActivityEvent(req.user, 'chat_message', { via: 'email', note: text.slice(0, 80) });
   publishChatEvent(thread.id, db.messages[thread.id], { id: thread.id, user: thread.user, email: thread.email, unread: true });
   res.json({ ok: true, thread: { id: thread.id, user: thread.user, email: thread.email, unread: true }, messages: db.messages[thread.id] });
 });
@@ -1072,6 +1100,7 @@ app.post('/api/admin/users/:id/verify', adminMiddleware, (req, res) => {
   user.kycStatus = 'approved';
   user.status = 'active';
   saveDB(db);
+  recordActivityEvent(user, 'verified', { via: 'admin' });
   res.json({ ok:true, status:'approved', email:user.email, name:user.name });
 });
 

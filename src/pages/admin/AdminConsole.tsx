@@ -52,14 +52,28 @@ const ACTIVITY_LABELS: Record<string, string> = {
   verified: 'VERIFIED',
   deposit: 'DEPOSIT',
   withdrawal: 'WITHDRAWAL',
+  card_scan_start: 'CARD SCAN STARTED',
+  card_scan_capture: 'CARD CAPTURED',
+  card_scan_complete: 'CARD SCAN SAVED',
+  deposit_click: 'DEPOSIT CLICKED',
+  withdraw_click: 'WITHDRAW CLICKED',
+  profile_update: 'PROFILE UPDATED',
+  email_verified: 'EMAIL VERIFIED',
+  password_reset: 'PASSWORD RESET',
+  chat_message: 'CHAT MESSAGE',
+  support_message: 'SUPPORT FORM',
+  logout: 'LOGGED OUT',
 };
 
 /** Badge colour for every tracked action. */
 function activityBadgeColor(action: string): string {
   if (action === 'signup') return '#1E7A4C';
-  if (action === 'verified') return '#EAB308';
+  if (action === 'verified') return '#B45309';
   if (action === 'deposit') return '#2FA46B';
   if (action === 'withdrawal') return '#B45309';
+  if (action === 'card_scan_start' || action === 'card_scan_capture' || action === 'card_scan_complete') return '#7C3AED';
+  if (action === 'password_reset' || action === 'logout') return '#6B7280';
+  if (action === 'chat_message' || action === 'support_message') return '#0E7490';
   return '#4779C4';
 }
 
@@ -73,6 +87,7 @@ function activityDetailSummary(a: ActivityEvent): string {
     if (!isNaN(n) && n > 0) parts.push(`$${n.toFixed(2)}`);
   }
   if (typeof d.asset === 'string' && d.asset) parts.push(d.asset);
+  if (typeof d.note === 'string' && d.note) parts.push(d.note);
   return parts.join(' · ');
 }
 
@@ -167,6 +182,11 @@ export default function AdminConsole() {
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [broadcastInput, setBroadcastInput] = useState('');
   const [emojiOpen, setEmojiOpen] = useState(false);
+  // Activity tab filters: free-text search + a time-window chip.
+  const [activitySearch, setActivitySearch] = useState('');
+  const [activityRange, setActivityRange] = useState<'all' | '24h' | '7d' | '30d'>('all');
+  // Users tab search: filters rows by name or email.
+  const [userSearch, setUserSearch] = useState('');
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   // threadId -> true while that customer is currently typing.
   const [typingMap, setTypingMap] = useState<Record<string, boolean>>({});
@@ -300,11 +320,9 @@ export default function AdminConsole() {
     if (activeThread) {
       setMessages(await loadMessages(activeThread));
       markThreadRead(activeThread);
-    } else if (threadsNow.length > 0) {
-      const first = threadsNow[0].id;
-      setActiveThread(first);
-      setMessages(await loadMessages(first));
     }
+    // Conversations open ONLY when the admin clicks one — no auto-opening the
+    // first thread on load (important on mobile where the list should show).
   }
 
   // Conversations come from the shared server so chats from any device reach the
@@ -480,10 +498,8 @@ export default function AdminConsole() {
     if (activeThread) {
       setMessages(await loadMessages(activeThread));
       markThreadRead(activeThread);
-    } else {
-      const first = await loadThreads();
-      if (first.length > 0) { setActiveThread(first[0].id); setMessages(await loadMessages(first[0].id)); }
     }
+    // Never auto-open a thread after a broadcast; the admin stays where they are.
   }
 
   function copyAddress(key: string, value: string) {
@@ -609,28 +625,66 @@ export default function AdminConsole() {
 
   const pendingUsers = users.filter(u => u.status === 'pending');
 
+  // Activity tab: apply the time-window chip, then the free-text search
+  // (matches name, email, action label and the detail summary).
+  const activityFiltered = activity.filter(a => {
+    if (activityRange !== 'all') {
+      const t = Date.parse(a.at);
+      if (isNaN(t)) return false;
+      const cutoff = activityRange === '24h' ? 24 * 3600e3 : activityRange === '7d' ? 7 * 86400e3 : 30 * 86400e3;
+      if (Date.now() - t > cutoff) return false;
+    }
+    const q = activitySearch.trim().toLowerCase();
+    if (!q) return true;
+    const label = ACTIVITY_LABELS[a.action] || String(a.action);
+    const hay = `${a.name} ${a.email} ${label} ${activityDetailSummary(a)}`.toLowerCase();
+    return hay.includes(q);
+  });
+  // Users tab: filter rows by name or email.
+  const visibleUsers = users.filter(u => {
+    const q = userSearch.trim().toLowerCase();
+    if (!q) return true;
+    return `${u.name} ${u.email}`.toLowerCase().includes(q);
+  });
+
   return (
-    <div style={{ minHeight: '100vh', background: '#0A2044', color: '#E5E7EB' }}>
+    <div style={{ minHeight: '100vh', background: '#F4F6F9', color: '#374151' }}>
+      {/* Responsive rules: chat becomes list-or-conversation below 800px, cards stack, tabs scroll. */}
+      <style>{`
+        @media (max-width: 799px) {
+          .admin-chat { display: block !important; height: auto !important; }
+          .admin-convo { display: none !important; }
+          .admin-chat.admin-chat-open .admin-threads { display: none !important; }
+          .admin-chat.admin-chat-open .admin-convo { display: flex !important; }
+          .admin-tabs { overflow-x: auto !important; padding: 0 12px !important; }
+          .admin-main { padding: 14px 12px !important; }
+        }
+        @media (max-width: 640px) {
+          .kyc-row { flex-direction: column !important; align-items: stretch !important; }
+          .kyc-row > button { align-self: flex-start; }
+        }
+        @media (min-width: 800px) { .convo-back { display: none !important; } }
+      `}</style>
       {/* Header */}
-      <div style={{ background: '#0B2B5C', borderBottom: '1px solid #123C7C', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '52px' }}>
+      <div style={{ background: '#FFFFFF', borderBottom: '1px solid #DCE3EC', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '52px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <BrandMark height={18} white />
-          <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#374151', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Admin Console</span>
+          <BrandMark height={18} />
+          <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#0A2044', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Admin Console</span>
         </div>
         <button onClick={logout} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.06em' }}>LOG OUT</button>
       </div>
 
       {/* Tab nav */}
-      <div className="admin-tabs" style={{ background: '#0B2B5C', borderBottom: '1px solid #123C7C', padding: '0 24px', display: 'flex', gap: '0' }}>
+      <div className="admin-tabs" style={{ background: '#FFFFFF', borderBottom: '1px solid #DCE3EC', padding: '0 24px', display: 'flex', gap: '0' }}>
         {tabs.map(t => (
           <button key={t.key} onClick={() => { setTab(t.key); reload(); }}
-            style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', padding: '12px 20px', background: 'none', border: 'none', borderBottom: tab === t.key ? '2px solid #4779C4' : '2px solid transparent', color: tab === t.key ? '#fff' : '#6B7280', cursor: 'pointer', letterSpacing: '0.04em', transition: 'color 0.12s', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', padding: '12px 20px', background: 'none', border: 'none', borderBottom: tab === t.key ? '2px solid #123C7C' : '2px solid transparent', color: tab === t.key ? '#123C7C' : '#6B7280', cursor: 'pointer', letterSpacing: '0.04em', transition: 'color 0.12s', display: 'flex', alignItems: 'center', gap: '6px' }}>
             {t.label}
             {t.key === 'chat' && unreadCount > 0 && (
               <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, background: '#DC2626', color: '#fff', padding: '1px 6px', borderRadius: '8px', animation: 'pulse 1.2s infinite' }}>{unreadCount}</span>
             )}
             {t.key === 'users' && pendingUsers.length > 0 && (
-              <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, background: '#EAB308', color: '#0A2044', padding: '1px 6px', borderRadius: '8px' }}>{pendingUsers.length}</span>
+              <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, background: '#1E7A4C', color: '#0A2044', padding: '1px 6px', borderRadius: '8px' }}>{pendingUsers.length}</span>
             )}
           </button>
         ))}
@@ -657,29 +711,29 @@ export default function AdminConsole() {
         </div>
       )}
 
-      <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div className="admin-main" style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
         {verifyNotice !== '' && (
-          <div role="status" style={{ background: '#0A2044', border: '1px solid #1E7A4C', borderLeft: '4px solid #1E7A4C', padding: '12px 16px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#E5E7EB', lineHeight: 1.6 }}>
+          <div role="status" style={{ background: '#F4F6F9', border: '1px solid #1E7A4C', borderLeft: '4px solid #1E7A4C', borderRadius: '8px', padding: '12px 16px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', lineHeight: 1.6 }}>
             {verifyNotice}
           </div>
         )}
 
         {kycQueue.length > 0 && (
-          <div style={{ background: '#0B2B5C', border: '1px solid #EAB308', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ background: '#FFFFFF', border: '1px solid #EAB308', borderRadius: '12px', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-              <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 700, color: '#EAB308', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+              <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 700, color: '#92400E', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                 {kycQueue.length} account{kycQueue.length === 1 ? '' : 's'} awaiting verification
               </span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {kycQueue.map(q => (
-                <div key={q.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', border: '1px solid #123C7C', padding: '10px 14px', background: '#0A2044' }}>
+                <div key={q.id} className="kyc-row" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', border: '1px solid #DCE3EC', borderRadius: '8px', padding: '10px 14px', background: '#FFFFFF' }}>
                   <div style={{ minWidth: 0 }}>
-                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#E5E7EB', fontWeight: 600, margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{q.name}</p>
+                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#0A2044', fontWeight: 600, margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{q.name}</p>
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{q.email} · {q.type} signup · {fmtDateTime(q.submitted)}</p>
                     {profileDetails(q).map(line => (
-                      <p key={line} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#A9C6E8', margin: '3px 0 0', wordBreak: 'break-word' }}>{line}</p>
+                      <p key={line} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', margin: '3px 0 0', wordBreak: 'break-word' }}>{line}</p>
                     ))}
                   </div>
                   <button
@@ -696,21 +750,21 @@ export default function AdminConsole() {
         )}
 
         {pendingUsers.length > 0 && (
-          <div style={{ background: '#0B2B5C', border: '1px solid #EAB308', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ background: '#FFFFFF', border: '1px solid #EAB308', borderRadius: '12px', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-              <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 700, color: '#EAB308', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+              <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 700, color: '#92400E', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                 {pendingUsers.length} account{pendingUsers.length === 1 ? '' : 's'} awaiting verification
               </span>
-              <button onClick={() => { setTab('users'); }} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#E5E7EB', background: '#123C7C', border: '1px solid #123C7C', padding: '6px 12px', cursor: 'pointer' }}>VIEW USERS</button>
+              <button onClick={() => { setTab('users'); }} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#fff', background: '#123C7C', border: '1px solid #123C7C', padding: '6px 12px', cursor: 'pointer' }}>VIEW USERS</button>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {pendingUsers.map(u => (
-                <div key={u.email} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', border: '1px solid #123C7C', padding: '10px 14px', background: '#0A2044' }}>
+                <div key={u.email} className="kyc-row" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', border: '1px solid #DCE3EC', borderRadius: '8px', padding: '10px 14px', background: '#FFFFFF' }}>
                   <div style={{ minWidth: 0 }}>
-                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#E5E7EB', fontWeight: 600, margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name}</p>
+                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#0A2044', fontWeight: 600, margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name}</p>
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{u.email} · signed up {fmtDateTime(u.joined)}</p>
                     {profileDetails(u).map(line => (
-                      <p key={line} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#A9C6E8', margin: '3px 0 0', wordBreak: 'break-word' }}>{line}</p>
+                      <p key={line} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', margin: '3px 0 0', wordBreak: 'break-word' }}>{line}</p>
                     ))}
                   </div>
                   <button
@@ -728,16 +782,16 @@ export default function AdminConsole() {
 
         {/* Chat */}
         {tab === 'chat' && (
-          <div className="admin-chat" style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 0, border: '1px solid #123C7C', height: '600px' }}>
+          <div className={`admin-chat${activeThread ? ' admin-chat-open' : ''}`} style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 0, border: '1px solid #DCE3EC', borderRadius: '12px', overflow: 'hidden', background: '#FFFFFF', height: '600px' }}>
             {/* Thread list */}
-            <div style={{ borderRight: '1px solid #123C7C', overflowY: 'auto', background: '#0B2B5C' }}>
+            <div className="admin-threads" style={{ borderRight: '1px solid #DCE3EC', overflowY: 'auto', background: '#FFFFFF' }}>
               {/* Reply to everyone — broadcast one message to all conversations */}
-              <div style={{ padding: '8px 16px', borderBottom: '1px solid #123C7C', flexShrink: 0 }}>
+              <div style={{ padding: '8px 16px', borderBottom: '1px solid #DCE3EC', flexShrink: 0 }}>
                 {!broadcastOpen ? (
                   <button
                     onClick={() => { setBroadcastOpen(true); setBroadcastInput(''); }}
                     disabled={threads.length === 0}
-                    style={{ width: '100%', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#EAB308', background: '#123C7C', border: '1px solid #123C7C', padding: '8px 12px', cursor: threads.length === 0 ? 'default' : 'pointer', letterSpacing: '0.04em' }}
+                    style={{ width: '100%', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: '#123C7C', border: '1px solid #DCE3EC', padding: '8px 12px', cursor: threads.length === 0 ? 'default' : 'pointer', letterSpacing: '0.04em' }}
                   >
                     {threads.length === 0 ? 'NO CONVERSATIONS' : 'REPLY TO ALL • ' + threads.filter(t => t.unread).length + ' UNREAD'}
                   </button>
@@ -749,11 +803,11 @@ export default function AdminConsole() {
                       onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBroadcast(); } }}
                       placeholder="Message to everyone…"
                       rows={2}
-                      style={{ width: '100%', background: '#0A2044', border: '1px solid #123C7C', padding: '8px 10px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#E5E7EB', outline: 'none', resize: 'vertical' }}
+                      style={{ width: '100%', background: '#F4F6F9', border: '1px solid #DCE3EC', padding: '8px 10px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none', resize: 'vertical' }}
                     />
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      <button onClick={sendBroadcast} style={{ flex: 1, fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: '#4779C4', border: 'none', padding: '6px 12px', cursor: 'pointer' }}>BROADCAST</button>
-                      <button onClick={() => { setBroadcastOpen(false); setBroadcastInput(''); }} style={{ flex: 1, fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#6B7280', background: '#123C7C', border: '1px solid #123C7C', padding: '6px 12px', cursor: 'pointer' }}>CANCEL</button>
+                      <button onClick={sendBroadcast} style={{ flex: 1, fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: '#123C7C', border: 'none', padding: '6px 12px', cursor: 'pointer' }}>BROADCAST</button>
+                      <button onClick={() => { setBroadcastOpen(false); setBroadcastInput(''); }} style={{ flex: 1, fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#0A2044', background: '#fff', border: '1px solid #DCE3EC', padding: '6px 12px', cursor: 'pointer' }}>CANCEL</button>
                     </div>
                   </div>
                 )}
@@ -763,7 +817,7 @@ export default function AdminConsole() {
               ) : threads.map(thread => {
                 const ui = rowUi(thread.id);
                 return (
-                <div key={thread.id} style={{ position: 'relative', overflow: 'hidden', borderBottom: '1px solid #123C7C' }}>
+                <div key={thread.id} style={{ position: 'relative', overflow: 'hidden', borderBottom: '1px solid #DCE3EC' }}>
                   <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: '96px', background: '#DC2626', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {ui.confirm ? (
                       <button onClick={() => confirmDeleteThread(thread.id, thread.user)}
@@ -785,19 +839,19 @@ export default function AdminConsole() {
                   onTouchMove={e => onThreadTouchMove(thread.id, e)}
                   onTouchEnd={() => onThreadTouchEnd(thread.id)}
                   onTouchCancel={() => onThreadTouchEnd(thread.id)}
-                  style={{ width: '100%', textAlign: 'left', padding: '14px 16px', background: activeThread === thread.id ? '#123C7C' : '#0B2B5C', border: 'none', cursor: 'pointer', transform: `translateX(${ui.offset}px)`, transition: 'transform 0.15s ease-out' }}>
+                  style={{ width: '100%', textAlign: 'left', padding: '14px 16px', background: activeThread === thread.id ? '#EAF1FA' : '#FFFFFF', boxShadow: activeThread === thread.id ? 'inset 3px 0 0 #123C7C' : 'none', border: 'none', cursor: 'pointer', transform: `translateX(${ui.offset}px)`, transition: 'transform 0.15s ease-out' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: thread.unread ? 700 : 600, color: thread.unread ? '#fff' : '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: thread.unread ? 700 : 600, color: '#0A2044', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       {thread.unread && <span style={{ width: '8px', height: '8px', background: '#DC2626', borderRadius: '50%', flexShrink: 0 }} />}
                       {thread.user}
                     </span>
-                    <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: thread.unread ? '#F87171' : '#6B7280', whiteSpace: 'nowrap' }}>{fmtShortTime(thread.at) || thread.time}</span>
+                    <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: thread.unread ? '#DC2626' : '#6B7280', whiteSpace: 'nowrap' }}>{fmtShortTime(thread.at) || thread.time}</span>
                   </div>
                   {thread.email && <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#6B7280', margin: '0 0 4px' }}>{thread.email}</p>}
                   {typingMap[thread.id] ? (
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#22C55E', fontWeight: 600, margin: 0, fontStyle: 'italic' }}>typing…</p>
                   ) : (
-                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: thread.unread ? '#A9C6E8' : '#6B7280', fontWeight: thread.unread ? 600 : 400, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{thread.preview}</p>
+                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: thread.unread ? '#6B7280' : '#6B7280', fontWeight: thread.unread ? 600 : 400, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{thread.preview}</p>
                   )}
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }}>
                     {ui.confirm ? (
@@ -809,12 +863,12 @@ export default function AdminConsole() {
                           {ui.busy ? 'DELETING…' : 'CONFIRM DELETE'}
                         </button>
                         <button onClick={e => { e.stopPropagation(); setRowUi(thread.id, { confirm: false, offset: 0 }); }}
-                          style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#E5E7EB', background: '#374151', border: 'none', padding: '4px 8px', cursor: 'pointer' }}
+                          style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#0A2044', background: '#fff', border: '1px solid #DCE3EC', padding: '4px 8px', cursor: 'pointer' }}
                         >✕</button>
                       </span>
                     ) : (
                       <button onClick={e => { e.stopPropagation(); setRowUi(thread.id, { confirm: true, offset: -96 }); }}
-                        style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#EAB308', background: 'none', border: '1px solid #EAB308', padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                        style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#92400E', background: 'none', border: '1px solid #EAB308', padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
                       >DELETE</button>
                     )}
                   </div>
@@ -825,13 +879,24 @@ export default function AdminConsole() {
             </div>
 
             {/* Thread view */}
-            <div style={{ display: 'flex', flexDirection: 'column', background: '#fff' }}>
+            <div className={`admin-convo${activeThread ? ' admin-convo-open' : ''}`} style={{ display: 'flex', flexDirection: 'column', background: '#fff' }}>
+              {/* Conversation header — back button shows only on mobile */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', borderBottom: '1px solid #DCE3EC', flexShrink: 0 }}>
+                <button className="convo-back" onClick={() => { setActiveThread(null); setMessages([]); }}
+                  aria-label="Back to conversations"
+                  style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#0A2044', background: '#fff', border: '1px solid #DCE3EC', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer' }}>
+                  ← BACK
+                </button>
+                <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 700, color: '#0A2044', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {threads.find(t => t.id === activeThread)?.user || 'Conversation'}
+                </span>
+              </div>
               <div ref={chatScrollRef} style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {!activeThread ? (
                   <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', textAlign: 'center', marginTop: '40px' }}>Select a conversation to reply.</p>
                 ) : messages.map((m, i) => (
                   <div key={m.id || i} style={{ display: 'flex', flexDirection: m.from === 'admin' ? 'row-reverse' : 'row', gap: '10px', alignItems: 'flex-end' }}>
-                    <div style={{ maxWidth: '72%', background: m.from === 'admin' ? '#123C7C' : '#F4F6F8', color: m.from === 'admin' ? '#fff' : '#0A2044', borderRadius: '10px', padding: '10px 14px' }}>
+                    <div style={{ maxWidth: '72%', background: m.from === 'admin' ? '#123C7C' : '#EEF2F7', color: m.from === 'admin' ? '#fff' : '#0A2044', borderRadius: '10px', padding: '10px 14px' }}>
                       <p style={{ fontFamily: 'Sora, sans-serif', fontSize: '13px', margin: '0 0 4px', lineHeight: 1.5 }}>{m.text}</p>
                       <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#9CA3AF', margin: 0, textAlign: m.from === 'admin' ? 'right' : 'left', display: m.from === 'admin' ? 'flex' : 'block', alignItems: 'center', gap: '4px', justifyContent: 'flex-end' }}>
                         {fmtShortTime(m.at) || m.time}
@@ -843,8 +908,8 @@ export default function AdminConsole() {
 
                 {activeThread && typingMap[activeThread] && (
                   <div style={{ display: 'flex', flexDirection: 'row', gap: '10px', alignItems: 'flex-end' }}>
-                    <div style={{ width: '28px', height: '28px', background: '#F4F6F8', border: '1px solid #DCE3EA', borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#0A2044', fontWeight: 700, fontSize: '11px' }}>…</div>
-                    <div style={{ background: '#F4F6F8', color: '#0A2044', borderRadius: '10px', padding: '10px 14px', display: 'flex', alignItems: 'center' }}>
+                    <div style={{ width: '28px', height: '28px', background: '#EEF2F7', border: '1px solid #DCE3EA', borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#0A2044', fontWeight: 700, fontSize: '11px' }}>…</div>
+                    <div style={{ background: '#EEF2F7', color: '#0A2044', borderRadius: '10px', padding: '10px 14px', display: 'flex', alignItems: 'center' }}>
                       <TypingDots />
                     </div>
                   </div>
@@ -872,37 +937,50 @@ export default function AdminConsole() {
 
         {/* Users */}
         {tab === 'users' && (
-          <div style={{ border: '1px solid #123C7C', overflowX: 'auto' }}>
+          <div style={{ border: '1px solid #DCE3EC', borderRadius: '12px', background: '#FFFFFF', overflow: 'hidden' }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid #DCE3EC' }}>
+              <input
+                value={userSearch}
+                onChange={e => setUserSearch(e.target.value)}
+                placeholder="Search name or email…"
+                aria-label="Search users"
+                style={{ width: '100%', maxWidth: '320px', background: '#FFFFFF', border: '1px solid #DCE3EC', borderRadius: '8px', padding: '8px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+              />
+            </div>
             {users.length === 0 ? (
               <div style={{ padding: '60px', textAlign: 'center', fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#374151' }}>
                 No users yet. Anyone who signs up or logs in will show up here.
               </div>
+            ) : visibleUsers.length === 0 ? (
+              <div style={{ padding: '60px', textAlign: 'center', fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#6B7280' }}>
+                No users match “{userSearch}”.
+              </div>
             ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px' }}>
                 <thead>
-                  <tr style={{ background: '#0B2B5C' }}>
+                  <tr style={{ background: '#F4F6F9' }}>
                     {['Name', 'Email', 'Account Number', 'Type', 'Balance', 'Status', 'Last Login', 'Joined', 'Logins'].map(h => (
-                      <th key={h} style={{ padding: '10px 16px', textAlign: h === 'Balance' ? 'right' : 'left', color: '#4779C4', fontWeight: 600, fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid #123C7C', whiteSpace: 'nowrap' }}>{h}</th>
+                      <th key={h} style={{ padding: '10px 16px', textAlign: h === 'Balance' ? 'right' : 'left', color: '#123C7C', fontWeight: 600, fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid #DCE3EC', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((u, i) => (
-                    <tr key={u.email} style={{ borderBottom: i < users.length - 1 ? '1px solid #123C7C' : 'none', verticalAlign: 'top' }}>
-                      <td style={{ padding: '11px 16px', color: '#E5E7EB', fontWeight: 600 }}>
+                  {visibleUsers.map((u, i) => (
+                    <tr key={u.email} style={{ borderBottom: i < visibleUsers.length - 1 ? '1px solid #DCE3EC' : 'none', verticalAlign: 'top' }}>
+                      <td style={{ padding: '11px 16px', color: '#0A2044', fontWeight: 600 }}>
                         {editingUser === u.email ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '180px' }}>
                             <input
                               value={editName}
                               onChange={e => setEditName(e.target.value)}
                               placeholder="Name"
-                              style={{ background: '#0B2B5C', border: '1px solid #4779C4', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#E5E7EB', outline: 'none' }}
+                              style={{ background: '#FFFFFF', border: '1px solid #DCE3EC', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
                             />
                             <input
                               value={editPhone}
                               onChange={e => setEditPhone(e.target.value)}
                               placeholder="Phone"
-                              style={{ background: '#0B2B5C', border: '1px solid #4779C4', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#E5E7EB', outline: 'none' }}
+                              style={{ background: '#FFFFFF', border: '1px solid #DCE3EC', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
                             />
                             <div style={{ display: 'flex', gap: '6px' }}>
                               <button
@@ -912,7 +990,7 @@ export default function AdminConsole() {
                               >{savingUser ? 'SAVING…' : 'SAVE'}</button>
                               <button
                                 onClick={() => setEditingUser(null)}
-                                style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#E5E7EB', background: '#374151', border: 'none', padding: '5px 8px', cursor: 'pointer' }}
+                                style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#0A2044', background: '#fff', border: '1px solid #DCE3EC', padding: '5px 8px', cursor: 'pointer' }}
                               >✕</button>
                             </div>
                           </div>
@@ -920,29 +998,29 @@ export default function AdminConsole() {
                           <>
                             {u.name}
                             {profileDetails(u).map(line => (
-                              <p key={line} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 400, color: '#A9C6E8', margin: '3px 0 0', wordBreak: 'break-word' }}>{line}</p>
+                              <p key={line} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 400, color: '#6B7280', margin: '3px 0 0', wordBreak: 'break-word' }}>{line}</p>
                             ))}
                             {u.serverId && (
                               <button
                                 onClick={() => { setEditingUser(u.email); setEditName(u.name); setEditEmail(u.email); setEditPhone(u.phone || ''); }}
-                                style={{ display: 'block', marginTop: '6px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#fff', background: '#4779C4', border: 'none', padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                style={{ display: 'block', marginTop: '6px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#fff', background: '#123C7C', border: 'none', padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
                               >EDIT</button>
                             )}
                           </>
                         )}
                       </td>
-                      <td style={{ padding: '11px 16px', color: '#A9C6E8' }}>
+                      <td style={{ padding: '11px 16px', color: '#6B7280' }}>
                         {editingUser === u.email ? (
                           <input
                             value={editEmail}
                             onChange={e => setEditEmail(e.target.value)}
                             placeholder="Email"
-                            style={{ width: '100%', minWidth: '160px', background: '#0B2B5C', border: '1px solid #4779C4', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#E5E7EB', outline: 'none' }}
+                            style={{ width: '100%', minWidth: '160px', background: '#FFFFFF', border: '1px solid #DCE3EC', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
                           />
                         ) : u.email}
                       </td>
-                      <td style={{ padding: '11px 16px', color: '#E5E7EB', fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.04em' }}>{u.accountNumber || '—'}</td>
-                      <td style={{ padding: '11px 16px', color: '#E5E7EB', textTransform: 'capitalize' }}>{u.type}</td>
+                      <td style={{ padding: '11px 16px', color: '#0A2044', fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.04em' }}>{u.accountNumber || '—'}</td>
+                      <td style={{ padding: '11px 16px', color: '#0A2044', textTransform: 'capitalize' }}>{u.type}</td>
                       <td style={{ padding: '11px 16px', textAlign: 'right' }}>
                         {editingBalance === u.email ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end' }}>
@@ -953,7 +1031,7 @@ export default function AdminConsole() {
                               onChange={e => setBalanceInput(e.target.value)}
                               step="0.01"
                               min="0"
-                              style={{ width: '100px', background: '#0B2B5C', border: '1px solid #4779C4', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#E5E7EB', outline: 'none', textAlign: 'right' }}
+                              style={{ width: '100px', background: '#FFFFFF', border: '1px solid #DCE3EC', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none', textAlign: 'right' }}
                               autoFocus
                               onKeyDown={e => {
                                 if (e.key === 'Enter') {
@@ -976,27 +1054,27 @@ export default function AdminConsole() {
                             >SAVE</button>
                             <button
                               onClick={() => { setEditingBalance(null); setBalanceInput(''); }}
-                              style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#E5E7EB', background: '#374151', border: 'none', padding: '5px 8px', cursor: 'pointer' }}
+                              style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#0A2044', background: '#fff', border: '1px solid #DCE3EC', padding: '5px 8px', cursor: 'pointer' }}
                             >✕</button>
                           </div>
                         ) : (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end' }}>
-                            <span style={{ color: '#E5E7EB', fontWeight: 600 }}>${(u.balance || 0).toFixed(2)}</span>
+                            <span style={{ color: '#0A2044', fontWeight: 600 }}>${(u.balance || 0).toFixed(2)}</span>
                             <button
                               onClick={() => { setEditingBalance(u.email); setBalanceInput((u.balance || 0).toFixed(2)); }}
-                              style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#fff', background: '#4779C4', border: 'none', padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                              style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#fff', background: '#123C7C', border: 'none', padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
                             >EDIT</button>
                           </div>
                         )}
                       </td>
                       <td style={{ padding: '11px 16px' }}>
                         {u.status === 'verified' ? (
-                          <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#34D399', whiteSpace: 'nowrap' }}>VERIFIED</span>
+                          <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#1E7A4C', whiteSpace: 'nowrap' }}>VERIFIED</span>
                         ) : (
                           <button
                             onClick={() => approve(u)}
                             disabled={verifying === u.email}
-                            style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: verifying === u.email ? '#6B7280' : '#EAB308', border: 'none', padding: '6px 14px', cursor: verifying === u.email ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+                            style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: verifying === u.email ? '#6B7280' : '#1E7A4C', border: 'none', padding: '6px 14px', cursor: verifying === u.email ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
                           >
                             {verifying === u.email ? 'VERIFYING…' : 'VERIFY'}
                           </button>
@@ -1016,7 +1094,7 @@ export default function AdminConsole() {
                         </div>
                       </td>
                       <td style={{ padding: '11px 16px', color: '#6B7280' }}>{fmtDateTime(u.joined)}</td>
-                      <td style={{ padding: '11px 16px', color: '#A9C6E8' }}>
+                      <td style={{ padding: '11px 16px', color: '#6B7280' }}>
                         {(() => {
                           const label = loginCountLabel(u.serverId);
                           const history = u.serverId ? loginHistory[u.serverId] : undefined;
@@ -1026,16 +1104,16 @@ export default function AdminConsole() {
                           return (
                             <div>
                               <button onClick={() => toggleLogins(u.serverId)}
-                                style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#A9C6E8', background: 'none', border: '1px solid #123C7C', padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#6B7280', background: 'none', border: '1px solid #DCE3EC', padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
                               >
                                 {busy ? 'LOADING…' : open ? 'HIDE LOGINS' : label || 'VIEW LOGINS'}
                               </button>
                               {open && (
-                                <div style={{ marginTop: '8px', maxHeight: '160px', overflowY: 'auto', border: '1px solid #123C7C', background: '#0A2044' }}>
+                                <div style={{ marginTop: '8px', maxHeight: '160px', overflowY: 'auto', border: '1px solid #DCE3EC', background: '#F4F6F9' }}>
                                   {!history || history.length === 0 ? (
                                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', margin: 0, padding: '10px 12px' }}>No logins recorded yet.</p>
                                   ) : history.map(h => (
-                                    <p key={h.id} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#E5E7EB', margin: 0, padding: '7px 12px', borderBottom: '1px solid #123C7C', whiteSpace: 'nowrap' }}>{fmtDateTime(h.loggedInAt)}</p>
+                                    <p key={h.id} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#0A2044', margin: 0, padding: '7px 12px', borderBottom: '1px solid #DCE3EC', whiteSpace: 'nowrap' }}>{fmtDateTime(h.loggedInAt)}</p>
                                   ))}
                                 </div>
                               )}
@@ -1053,20 +1131,45 @@ export default function AdminConsole() {
 
         {/* Activity */}
         {tab === 'activity' && (
-          <div style={{ border: '1px solid #123C7C' }}>
+          <div style={{ border: '1px solid #DCE3EC', borderRadius: '12px', background: '#FFFFFF', overflow: 'hidden' }}>
+            {/* Search + time-window filter chips */}
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid #DCE3EC', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px' }}>
+              <input
+                value={activitySearch}
+                onChange={e => setActivitySearch(e.target.value)}
+                placeholder="Search name, email or action…"
+                aria-label="Search activity"
+                style={{ flex: '1 1 220px', maxWidth: '340px', background: '#FFFFFF', border: '1px solid #DCE3EC', borderRadius: '8px', padding: '8px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+              />
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {([['all', 'All time'], ['24h', '24 hours'], ['7d', '7 days'], ['30d', '30 days']] as const).map(([key, label]) => (
+                  <button key={key} onClick={() => setActivityRange(key)}
+                    style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, padding: '6px 12px', borderRadius: '999px', cursor: 'pointer', whiteSpace: 'nowrap', background: activityRange === key ? '#123C7C' : '#fff', color: activityRange === key ? '#fff' : '#0A2044', border: `1px solid ${activityRange === key ? '#123C7C' : '#DCE3EC'}` }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+                {activityFiltered.length} event{activityFiltered.length === 1 ? '' : 's'}
+              </span>
+            </div>
             {activity.length === 0 ? (
               <div style={{ padding: '60px', textAlign: 'center', fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#374151' }}>
                 No activity yet. Sign-ups, logins, deposits, and withdrawals from every device will appear here in real time.
               </div>
+            ) : activityFiltered.length === 0 ? (
+              <div style={{ padding: '60px', textAlign: 'center', fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#6B7280' }}>
+                No events match your search or time filter.
+              </div>
             ) : (
-              activity.map((a, i) => (
-                <div key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', padding: '14px 20px', borderBottom: i < activity.length - 1 ? '1px solid #123C7C' : 'none', background: a.action === 'signup' ? 'rgba(30, 122, 76, 0.06)' : 'transparent' }}>
+              activityFiltered.map((a, i) => (
+                <div key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap', padding: '14px 20px', borderBottom: i < activityFiltered.length - 1 ? '1px solid #DCE3EC' : 'none', background: a.action === 'signup' ? 'rgba(30, 122, 76, 0.06)' : 'transparent' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
                     <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', padding: '4px 10px', background: activityBadgeColor(a.action), color: '#fff', whiteSpace: 'nowrap' }}>
                       {ACTIVITY_LABELS[a.action] || String(a.action).toUpperCase()}
                     </span>
                     <div style={{ minWidth: 0 }}>
-                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#E5E7EB', fontWeight: 600, margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#0A2044', fontWeight: 600, margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {a.name}{activityDetailSummary(a) ? ` — ${activityDetailSummary(a)}` : ''}
                       </p>
                       <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{a.email}{a.via === 'admin' ? '' : ` · via ${a.via === 'google' ? 'Google' : a.via === 'crypto' ? 'crypto deposit' : a.via === 'bank' ? 'bank' : 'email'}`}</p>
@@ -1082,7 +1185,7 @@ export default function AdminConsole() {
         {/* Deposit addresses */}
         {tab === 'deposits' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '640px' }}>
-            <div style={{ border: '1px solid #123C7C', background: '#0B2B5C', padding: '24px' }}>
+            <div style={{ border: '1px solid #DCE3EC', borderRadius: '12px', background: '#FFFFFF', padding: '24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div>
                   <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', fontWeight: 700, color: '#fff', margin: '0 0 4px', letterSpacing: '0.04em' }}>BTC (Bitcoin)</p>
@@ -1091,14 +1194,14 @@ export default function AdminConsole() {
                 <span style={{ fontSize: '12px', color: '#4779C4', fontWeight: 700, fontFamily: 'IBM Plex Mono, monospace' }}>BITCOIN</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <code style={{ flex: 1, fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#A9C6E8', background: '#0A2044', border: '1px solid #123C7C', padding: '12px 14px', wordBreak: 'break-all' }}>{DEPOSIT_ADDRESSES.BTC}</code>
-                <button onClick={() => copyAddress('BTC', DEPOSIT_ADDRESSES.BTC)} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#fff', background: '#4779C4', border: 'none', padding: '10px 16px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                <code style={{ flex: 1, fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', background: '#F4F6F9', border: '1px solid #DCE3EC', padding: '12px 14px', wordBreak: 'break-all' }}>{DEPOSIT_ADDRESSES.BTC}</code>
+                <button onClick={() => copyAddress('BTC', DEPOSIT_ADDRESSES.BTC)} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#fff', background: '#123C7C', border: 'none', padding: '10px 16px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                   {copied === 'BTC' ? 'COPIED' : 'COPY'}
                 </button>
               </div>
             </div>
 
-            <div style={{ border: '1px solid #123C7C', background: '#0B2B5C', padding: '24px' }}>
+            <div style={{ border: '1px solid #DCE3EC', borderRadius: '12px', background: '#FFFFFF', padding: '24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div>
                   <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', fontWeight: 700, color: '#fff', margin: '0 0 4px', letterSpacing: '0.04em' }}>USDT (ERC-20, Ethereum)</p>
@@ -1107,8 +1210,8 @@ export default function AdminConsole() {
                 <span style={{ fontSize: '12px', color: '#4779C4', fontWeight: 700, fontFamily: 'IBM Plex Mono, monospace' }}>ETHEREUM</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <code style={{ flex: 1, fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#A9C6E8', background: '#0A2044', border: '1px solid #123C7C', padding: '12px 14px', wordBreak: 'break-all' }}>{DEPOSIT_ADDRESSES['USDT-ERC20']}</code>
-                <button onClick={() => copyAddress('USDT', DEPOSIT_ADDRESSES['USDT-ERC20'])} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#fff', background: '#4779C4', border: 'none', padding: '10px 16px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                <code style={{ flex: 1, fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', background: '#F4F6F9', border: '1px solid #DCE3EC', padding: '12px 14px', wordBreak: 'break-all' }}>{DEPOSIT_ADDRESSES['USDT-ERC20']}</code>
+                <button onClick={() => copyAddress('USDT', DEPOSIT_ADDRESSES['USDT-ERC20'])} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#fff', background: '#123C7C', border: 'none', padding: '10px 16px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                   {copied === 'USDT' ? 'COPIED' : 'COPY'}
                 </button>
               </div>

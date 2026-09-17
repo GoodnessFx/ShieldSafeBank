@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { trackUserActivity } from '../lib/api';
 
 export interface CardScanResult {
   front: boolean;
@@ -212,6 +213,7 @@ export default function CardScanner({ accountName, initialHolderName, onClose, o
           return;
         }
         setScanError('');
+        trackUserActivity('card_scan_capture', { step: nextStep === 'back' ? 'front' : 'back' });
         if (nextStep === 'back') setFrontOk(true);
         else setScanComplete(true);
       }
