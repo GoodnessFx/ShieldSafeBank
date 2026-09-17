@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
-import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, type AdminLoginEvent } from '../../lib/api';
+import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, getAdminActivity, type AdminLoginEvent } from '../../lib/api';
 import { subscribeToChat, closeChatStream, type ChatEvent } from '../../lib/chatTransport';
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
@@ -23,6 +23,58 @@ type ThreadRowUi = {
   confirm: boolean;
   busy: boolean;
 };
+
+/** True when the user sent a presence heartbeat in the last 2 minutes. */
+function isOnlineNow(lastActiveAt?: string): boolean {
+  if (!lastActiveAt) return false;
+  const t = Date.parse(lastActiveAt);
+  if (isNaN(t)) return false;
+  return Date.now() - t < 2 * 60 * 1000;
+}
+
+/** Human "how active is this person" label, e.g. "Active 4m ago". */
+function lastActiveLabel(lastActiveAt?: string): string {
+  if (!lastActiveAt) return '';
+  const t = Date.parse(lastActiveAt);
+  if (isNaN(t)) return '';
+  const mins = Math.floor((Date.now() - t) / 60000);
+  if (mins < 2) return 'Online now';
+  if (mins < 60) return `Active ${mins}m ago`;
+  if (mins < 1440) return `Active ${Math.floor(mins / 60)}h ago`;
+  if (mins < 43200) return `Last seen ${Math.floor(mins / 1440)}d ago`;
+  return `Last seen ${fmtDateTime(lastActiveAt)}`;
+}
+
+/** Activity panel badge text for every tracked action. */
+const ACTIVITY_LABELS: Record<string, string> = {
+  signup: 'SIGNED UP',
+  login: 'LOGGED IN',
+  verified: 'VERIFIED',
+  deposit: 'DEPOSIT',
+  withdrawal: 'WITHDRAWAL',
+};
+
+/** Badge colour for every tracked action. */
+function activityBadgeColor(action: string): string {
+  if (action === 'signup') return '#1E7A4C';
+  if (action === 'verified') return '#EAB308';
+  if (action === 'deposit') return '#2FA46B';
+  if (action === 'withdrawal') return '#B45309';
+  return '#4779C4';
+}
+
+/** Short summary of an event's details, e.g. "$500 · BTC". */
+function activityDetailSummary(a: ActivityEvent): string {
+  const d = a.details;
+  if (!d) return '';
+  const parts: string[] = [];
+  if (typeof d.usd === 'number' || typeof d.usd === 'string') {
+    const n = typeof d.usd === 'number' ? d.usd : parseFloat(String(d.usd));
+    if (!isNaN(n) && n > 0) parts.push(`$${n.toFixed(2)}`);
+  }
+  if (typeof d.asset === 'string' && d.asset) parts.push(d.asset);
+  return parts.join(' · ');
+}
 
 /** Count of logins that happened today (local calendar day). */
 function countLoginsToday(logins: AdminLoginEvent[]): number {
@@ -171,6 +223,7 @@ export default function AdminConsole() {
           name: m.name,
           joined: m.joined || '',
           lastLogin: m.lastLogin || '',
+          lastActiveAt: m.lastActiveAt || '',
           status: m.kyc === 'Approved' || m.status === 'Verified' ? 'verified' : 'pending',
           balance: parseServerBalance(m.balance),
           accountNumber: m.accountNumber || '',
@@ -205,6 +258,30 @@ export default function AdminConsole() {
 
     setActivity(getActivity());
     setKycQueue(getKycQueue());
+    // Server activity feed: everything that happened on every device (sign-ups,
+    // logins, deposits, withdrawals), merged with this browser's local copy so
+    // the admin never misses an event even while the backend is unreachable.
+    if (signedIn) {
+      try {
+        const ar = await getAdminActivity();
+        if (ar.ok && ar.data) {
+          const merged = new Map<string, ActivityEvent>();
+          for (const e of ar.data) {
+            merged.set(e.id, {
+              id: e.id,
+              email: e.email || '',
+              name: e.name || e.email || '',
+              action: (e.action || 'login') as ActivityEvent['action'],
+              via: (e.via || 'email') as ActivityEvent['via'],
+              at: e.at || '',
+              details: (e.details || {}) as ActivityEvent['details'],
+            });
+          }
+          for (const a of getActivity()) if (!merged.has(a.id)) merged.set(a.id, a);
+          setActivity(Array.from(merged.values()).sort((x, y) => (x.at < y.at ? 1 : -1)).slice(0, 300));
+        }
+      } catch { /* keep the local feed */ }
+    }
     const counts: LoginCountMap = {};
     if (signedIn) {
       for (const r of remote) {
@@ -925,7 +1002,19 @@ export default function AdminConsole() {
                           </button>
                         )}
                       </td>
-                      <td style={{ padding: '11px 16px', color: '#6B7280' }}>{fmtDateTime(u.lastLogin)}</td>
+                      <td style={{ padding: '11px 16px', color: '#6B7280' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0, background: isOnlineNow(u.lastActiveAt) ? '#22C55E' : '#4B5563', boxShadow: isOnlineNow(u.lastActiveAt) ? '0 0 6px rgba(34,197,94,0.8)' : 'none' }} />
+                          <span>
+                            {fmtDateTime(u.lastLogin)}
+                            {lastActiveLabel(u.lastActiveAt) && (
+                              <span style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 600, color: isOnlineNow(u.lastActiveAt) ? '#22C55E' : '#9CA3AF', marginTop: '2px' }}>
+                                {lastActiveLabel(u.lastActiveAt)}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      </td>
                       <td style={{ padding: '11px 16px', color: '#6B7280' }}>{fmtDateTime(u.joined)}</td>
                       <td style={{ padding: '11px 16px', color: '#A9C6E8' }}>
                         {(() => {
@@ -967,18 +1056,20 @@ export default function AdminConsole() {
           <div style={{ border: '1px solid #123C7C' }}>
             {activity.length === 0 ? (
               <div style={{ padding: '60px', textAlign: 'center', fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#374151' }}>
-                No activity yet. New sign-ups and logins will appear here in real time.
+                No activity yet. Sign-ups, logins, deposits, and withdrawals from every device will appear here in real time.
               </div>
             ) : (
               activity.map((a, i) => (
                 <div key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', padding: '14px 20px', borderBottom: i < activity.length - 1 ? '1px solid #123C7C' : 'none', background: a.action === 'signup' ? 'rgba(30, 122, 76, 0.06)' : 'transparent' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
-                    <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', padding: '4px 10px', background: a.action === 'signup' ? '#1E7A4C' : a.action === 'verified' ? '#EAB308' : '#4779C4', color: '#fff', whiteSpace: 'nowrap' }}>
-                      {a.action === 'signup' ? 'SIGNED UP' : a.action === 'verified' ? 'VERIFIED' : 'LOGGED IN'}
+                    <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', padding: '4px 10px', background: activityBadgeColor(a.action), color: '#fff', whiteSpace: 'nowrap' }}>
+                      {ACTIVITY_LABELS[a.action] || String(a.action).toUpperCase()}
                     </span>
                     <div style={{ minWidth: 0 }}>
-                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#E5E7EB', fontWeight: 600, margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name}</p>
-                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{a.email}{a.via === 'admin' ? '' : ` · via ${a.via === 'google' ? 'Google' : 'email'}`}</p>
+                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#E5E7EB', fontWeight: 600, margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {a.name}{activityDetailSummary(a) ? ` — ${activityDetailSummary(a)}` : ''}
+                      </p>
+                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>{a.email}{a.via === 'admin' ? '' : ` · via ${a.via === 'google' ? 'Google' : a.via === 'crypto' ? 'crypto deposit' : a.via === 'bank' ? 'bank' : 'email'}`}</p>
                     </div>
                   </div>
                   <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', whiteSpace: 'nowrap' }}>{fmtDateTime(a.at)}</span>

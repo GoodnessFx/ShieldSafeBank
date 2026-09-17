@@ -50,6 +50,7 @@ export default function ChatWidget() {
   const [agentsConnected, setAgentsConnected] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [agentTyping, setAgentTyping] = useState(false);
+  const [quote, setQuote] = useState<ChatMessage | null>(null);
   const openRef = useRef(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -295,8 +296,13 @@ export default function ChatWidget() {
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1L1.5 3.5V8C1.5 11.1 4 13.5 7 14C10 13.5 12.5 11.1 12.5 8V3.5L7 1Z" fill="#fff" /><rect x="5.5" y="6" width="3" height="3.5" rx="0.25" fill="none" stroke="#123C7C" strokeWidth="0.8" /><path d="M5.8 6V5.25C5.8 4.284 6.585 3.5 7.55 3.5" stroke="#123C7C" strokeWidth="0.8" strokeLinecap="square" /></svg>
                 </div>}
                 <div>
-                  <div style={{ maxWidth: '75%', padding: '8px 12px', background: m.from === 'user' ? '#123C7C' : '#F4F6F8', color: m.from === 'user' ? '#fff' : '#0A2044', fontSize: '13px', lineHeight: 1.5 }}>
+                  <div style={{ maxWidth: '75%', padding: '8px 12px', background: m.from === 'user' ? '#123C7C' : '#F4F6F8', color: m.from === 'user' ? '#fff' : '#0A2044', fontSize: '13px', lineHeight: 1.5, cursor: 'pointer', position: 'relative' }} onClick={() => setQuote(m.id === quote?.id ? null : m)}>
                     {m.text}
+                    {quote && m.id === quote.id && (
+                      <div style={{ marginTop: '6px', padding: '6px 8px', background: 'rgba(18,60,124,0.1)', borderRadius: '6px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#123C7C' }}>
+                        <span style={{ fontWeight: 600 }}>replying to you:</span>
+                      </div>
+                    )}
                   </div>
                   {m.time && (
                     <p style={{ margin: '3px 0 0', fontSize: '10px', color: '#9CA3AF', textAlign: m.from === 'user' ? 'right' : 'left', display: m.from === 'user' ? 'flex' : 'block', alignItems: 'center', gap: '4px', justifyContent: 'flex-end' }}>

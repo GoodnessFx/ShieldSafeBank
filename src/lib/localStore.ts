@@ -6,6 +6,8 @@ export interface StoreUser {
   type: string;
   joined: string;
   lastLogin: string;
+  /** Last presence heartbeat from the shared server ("" when unknown). */
+  lastActiveAt?: string;
   status: 'pending' | 'verified';
   balance: number;
   accountNumber: string;
@@ -27,9 +29,10 @@ export interface ActivityEvent {
   id: string;
   email: string;
   name: string;
-  action: 'signup' | 'login' | 'verified';
-  via: 'email' | 'google' | 'admin';
+  action: 'signup' | 'login' | 'verified' | 'deposit' | 'withdrawal';
+  via: 'email' | 'google' | 'admin' | 'crypto' | 'bank' | 'unknown';
   at: string;
+  details?: Record<string, string | number>;
 }
 
 export interface LocalTx {

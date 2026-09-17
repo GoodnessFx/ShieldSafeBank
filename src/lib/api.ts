@@ -390,6 +390,31 @@ export async function sendChatTyping() {
   return apiFetch('/chat/typing', { method: 'POST', body: {} });
 }
 
+/** Presence heartbeat: tells the shared server this customer is active right
+ * now, so the admin console can show who is online. Runs every 30 seconds for
+ * as long as the browser is signed in; failures are silent by design. */
+export async function sendActivityHeartbeat() {
+  return apiFetch('/auth/heartbeat', { method: 'POST', body: {} });
+}
+
+let heartbeatStarted = false;
+
+/** Starts the presence heartbeat loop exactly once per browser session. Safe to
+ * call any time — it only fires while `ssb_auth` is set (a customer is in). */
+export function startActivityHeartbeat() {
+  if (heartbeatStarted || typeof window === 'undefined') return;
+  heartbeatStarted = true;
+  const beat = () => {
+    if (localStorage.getItem('ssb_auth') === '1') void sendActivityHeartbeat();
+  };
+  beat();
+  setInterval(beat, 30000);
+}
+
+// Kick the loop off at module load — signed-in customers are tracked from the
+// first paint without any page having to remember to start it.
+startActivityHeartbeat();
+
 /** Presence for the customer chat header: is an agent at the console now? */
 export async function getChatPresence() {
   return apiFetch<{ ok: boolean; agents: number; agentOnline: boolean; time: string }>('/chat/presence');
@@ -540,7 +565,7 @@ export async function adminLogin(email: string, password: string, totp = ''): Pr
 }
 
 export async function getAdminUsers() {
-  return adminFetch<{ id: string; name: string; email: string; status: string; balance: string; joined: string; lastLogin: string; kyc: string; accountNumber?: string; firstName: string; middleName: string; lastName: string; phone: string; dob: string; address: string; businessName: string; type: string }[]>('/admin/users');
+  return adminFetch<{ id: string; name: string; email: string; status: string; balance: string; joined: string; lastLogin: string; lastActiveAt?: string; kyc: string; accountNumber?: string; firstName: string; middleName: string; lastName: string; phone: string; dob: string; address: string; businessName: string; type: string }[]>('/admin/users');
 }
 
 // Authenticated liveness probe for the deployed console. Unlike the public
@@ -644,6 +669,24 @@ export interface AdminLoginEvent {
 /** Full login history for one user, newest first. */
 export async function getAdminUserLogins(userId: string) {
   return adminFetch<AdminLoginEvent[]>(`/admin/users/${userId}/logins`);
+}
+
+/** One merged activity feed row from the shared server. */
+export interface AdminActivityEvent {
+  id: string;
+  userId: string;
+  email: string;
+  name: string;
+  action: 'signup' | 'login' | 'verified' | 'deposit' | 'withdrawal' | string;
+  via: string;
+  at: string;
+  details?: Record<string, unknown>;
+}
+
+/** Every tracked event from every device — sign-ups, logins, deposits,
+ * withdrawals — merged into one feed, newest first. */
+export async function getAdminActivity() {
+  return adminFetch<AdminActivityEvent[]>('/admin/activity');
 }
 
 export async function simulateDeposit(userId: string, asset: string, amount: number) {

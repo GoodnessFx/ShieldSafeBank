@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS kyc_queue (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS messages (thread_id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS login_events (id TEXT PRIMARY KEY, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS activity_events (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS support_messages (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
 `;
@@ -105,6 +106,7 @@ async function persistToPg(store) {
     await client.query('DELETE FROM threads');
     await client.query('DELETE FROM messages');
     await client.query('DELETE FROM login_events');
+    await client.query('DELETE FROM activity_events');
     await client.query('DELETE FROM support_messages');
     await client.query('DELETE FROM counters');
     for (const u of store.users) {
@@ -128,6 +130,9 @@ async function persistToPg(store) {
     for (const s of store.supportMessages) {
       await client.query('INSERT INTO support_messages (id, data) VALUES ($1, $2::jsonb)', [s.id, JSON.stringify(s)]);
     }
+    for (const e of store.activityEvents || []) {
+      await client.query('INSERT INTO activity_events (id, data) VALUES ($1, $2::jsonb)', [e.id, JSON.stringify(e)]);
+    }
     for (const [name, value] of Object.entries(store.counters || {})) {
       await client.query('INSERT INTO counters (name, value) VALUES ($1, $2)', [name, Number(value) || 0]);
     }
@@ -144,13 +149,14 @@ async function loadFromPg() {
   const client = await pool.connect();
   try {
     await ensureSchema(client);
-    const [users, transactions, kycQueue, threads, messages, loginEvents, supportMessages, counters] = await Promise.all([
+    const [users, transactions, kycQueue, threads, messages, loginEvents, activityEvents, supportMessages, counters] = await Promise.all([
       client.query('SELECT data FROM users'),
       client.query('SELECT data FROM transactions'),
       client.query('SELECT data FROM kyc_queue'),
       client.query('SELECT data FROM threads'),
       client.query('SELECT thread_id, data FROM messages'),
       client.query('SELECT data FROM login_events'),
+      client.query('SELECT data FROM activity_events'),
       client.query('SELECT data FROM support_messages'),
       client.query('SELECT name, value FROM counters'),
     ]);
@@ -165,6 +171,7 @@ async function loadFromPg() {
       threads: threads.rows.map(r => r.data),
       messages: msgMap,
       loginEvents: loginEvents.rows.map(r => r.data),
+      activityEvents: activityEvents.rows.map(r => r.data),
       supportMessages: supportMessages.rows.map(r => r.data),
       counters: counterMap,
     });
@@ -219,6 +226,7 @@ function normalizeDB(db) {
     u.kycStatus = u.kycStatus || 'pending';
     u.joined = u.joined || '';
     u.lastLogin = u.lastLogin || '';
+    u.lastActiveAt = u.lastActiveAt || '';
     u.emailVerified = !!u.emailVerified;
     u.totpEnabled = !!u.totpEnabled;
     u.accountNumber = makeAccountNumber(u.accountNumber);
@@ -267,6 +275,15 @@ function normalizeDB(db) {
     e.userId = e.userId || '';
     e.email = e.email || '';
     e.loggedInAt = e.loggedInAt || '';
+  });
+  store.activityEvents = Array.isArray(store.activityEvents) ? store.activityEvents : [];
+  store.activityEvents.forEach(e => {
+    e.id = e.id || '';
+    e.userId = e.userId || '';
+    e.email = e.email || '';
+    e.action = e.action || 'login';
+    e.details = e.details || {};
+    e.at = e.at || '';
   });
   store.counters = store.counters && typeof store.counters === 'object' ? store.counters : {};
   return store;
@@ -329,7 +346,7 @@ function userIdFromToken(token) {
 
 function nextId(db, type) {
   db.counters[type] = (db.counters[type] || 0) + 1;
-  const prefixes = { user:'U', tx:'T', thread:'C', kyc:'K', support:'S', login:'L' };
+  const prefixes = { user:'U', tx:'T', thread:'C', kyc:'K', support:'S', login:'L', activity:'A' };
   return `${prefixes[type] || type.toUpperCase()}${String(db.counters[type]).padStart(4,'0')}`;
 }
 
@@ -346,6 +363,24 @@ function recordLoginEvent(user) {
   db.loginEvents.push(event);
   saveDB(db);
   return event;
+}
+
+/** Records a user activity event so the admin Activity panel captures everything
+ * that happens across all devices — logins, deposits, withdrawals, sign-ups. */
+function recordActivityEvent(user, action, details = {}) {
+  if (!user) return;
+  const event = {
+    id: nextId(db, 'activity'),
+    userId: user.id,
+    email: user.email || '',
+    name: user.name || '',
+    action,
+    via: details.via || 'email',
+    details,
+    at: new Date().toISOString(),
+  };
+  db.activityEvents.push(event);
+  saveDB(db);
 }
 
 /* ---------------------------------------------------------------------------
@@ -508,9 +543,11 @@ app.post('/api/auth/register', (req, res) => {
     businessName: businessName || '',
     accountNumber: makeAccountNumber(),
     lastLogin: new Date().toISOString(),
+    lastActiveAt: new Date().toISOString(),
   };
   db.users.push(user);
   saveDB(db);
+  recordActivityEvent(user, 'signup', { via: 'email' });
   const token = userToken(user.id);
   res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
 });
@@ -524,6 +561,7 @@ app.post('/api/auth/login', (req, res) => {
   if (user.status === 'suspended') return res.status(403).json({ error:'Account is suspended.' });
   const token = userToken(user.id);
   user.lastLogin = new Date().toISOString();
+  user.lastActiveAt = user.lastLogin;
   recordLoginEvent(user);
   saveDB(db);
   res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
@@ -559,11 +597,15 @@ app.post('/api/auth/google', async (req, res) => {
       joined: new Date().toISOString().slice(0,10), emailVerified:true, totpEnabled:false,
       accountNumber: makeAccountNumber(),
       lastLogin: new Date().toISOString(),
+      lastActiveAt: new Date().toISOString(),
     };
     db.users.push(user);
     saveDB(db);
+    recordActivityEvent(user, 'signup', { via: 'google' });
   } else {
     user.lastLogin = new Date().toISOString();
+    user.lastActiveAt = user.lastLogin;
+    recordLoginEvent(user);
     saveDB(db);
   }
   const token = userToken(user.id);
@@ -572,6 +614,27 @@ app.post('/api/auth/google', async (req, res) => {
 
 app.post('/api/auth/forgot-password', (_, res) => {
   res.json({ ok:true, message:'If an account exists, a reset link has been sent.' });
+});
+// Customer deposit endpoint: records the deposit, credits the balance, and logs
+// an activity event so the admin Activity panel shows every deposit from every device.
+app.post('/api/deposits', authMiddleware, (req, res) => {
+  const { asset, usd } = req.body;
+  const amt = typeof usd === 'number' ? usd : parseFloat(String(usd || '0'));
+  if (!req.user) return res.status(401).json({ error:'Not signed in.' });
+  if (!asset || !['BTC','USDT-ERC20'].includes(asset)) return res.status(400).json({ error:'Invalid asset.' });
+  if (!amt || isNaN(amt) || amt <= 0) return res.status(400).json({ error:'Enter a valid amount.' });
+  if (amt < 10) return res.status(400).json({ error:'Minimum deposit is $10.00.' });
+  const feeRate = asset === 'BTC' ? 0.005 : 0.003;
+  const net = Math.round(amt * (1 - feeRate) * 100) / 100;
+  req.user.balance = Math.round((req.user.balance + net) * 100) / 100;
+  const tx = {
+    id: nextId(db,'tx'), userId: req.user.id, date: new Date().toISOString().slice(0,10),
+    type:'deposit', asset, amount: String(amt), rate: 1, usd: net, status:'completed',
+  };
+  db.transactions.push(tx);
+  saveDB(db);
+  recordActivityEvent(req.user, 'deposit', { via: 'crypto', asset, usd: amt, net, status: 'completed' });
+  res.json({ ok:true, message:`Deposit of $${amt.toFixed(2)} recorded (${net} credited).`, balance: req.user.balance });
 });
 
 app.post('/api/auth/verify-email', authMiddleware, (req, res) => {
@@ -583,6 +646,17 @@ app.post('/api/auth/verify-email', authMiddleware, (req, res) => {
 app.get('/api/auth/me', authMiddleware, (req, res) => {
   const u = req.user;
   res.json({ id:u.id, email:u.email, name:u.name, balance:num(u.balance), kycStatus:u.kycStatus, type:u.type, status:u.status, joined:u.joined, emailVerified:u.emailVerified, accountNumber:u.accountNumber, firstName:u.firstName || '', middleName:u.middleName || '', lastName:u.lastName || '', phone:u.phone || '', dob:u.dob || '', address:u.address || '', businessName:u.businessName || '' });
+});
+
+// Presence heartbeat: every signed-in customer pings this every 30 seconds so the
+// admin console can show who is online right now. Never creates an activity
+// event — it only refreshes lastActiveAt (writes throttled to one per 20s).
+app.post('/api/auth/heartbeat', authMiddleware, (req, res) => {
+  const now = Date.now();
+  const last = req.user.lastActiveAt ? Date.parse(req.user.lastActiveAt) || 0 : 0;
+  req.user.lastActiveAt = new Date().toISOString();
+  if (now - last > 20000) saveDB(db);
+  res.json({ ok: true, time: req.user.lastActiveAt });
 });
 
 app.post('/api/auth/profile', authMiddleware, (req, res) => {
@@ -617,6 +691,7 @@ app.post('/api/withdrawals', authMiddleware, (req, res) => {
   };
   db.transactions.push(tx);
   saveDB(db);
+  recordActivityEvent(req.user, 'withdrawal', { via: 'bank', usd: amt, status: 'pending' });
   res.json({ ok:true, message:`Withdrawal of $${amt.toFixed(2)} requested.`, balance: req.user.balance });
 });
 
@@ -781,6 +856,7 @@ app.get('/api/admin/users', adminMiddleware, (_, res) => {
     id:u.id, name:u.name, email:u.email, accountNumber:u.accountNumber,
     status: u.kycStatus === 'approved' ? 'Verified' : u.status === 'suspended' ? 'Suspended' : 'Pending KYC',
     balance: '$' + num(u.balance).toFixed(2), joined:u.joined, lastLogin: u.lastLogin || '',
+    lastActiveAt: u.lastActiveAt || '',
     kyc: u.kycStatus === 'approved' ? 'Approved' : u.kycStatus === 'rejected' ? 'Rejected' : 'In Review',
     firstName: u.firstName || '', middleName: u.middleName || '', lastName: u.lastName || '',
     phone: u.phone || '', dob: u.dob || '', address: u.address || '',
@@ -828,6 +904,32 @@ app.post('/api/admin/transactions/:id/hold', adminMiddleware, (req, res) => {
 
 app.get('/api/admin/threads', adminMiddleware, (_, res) => {
   res.json(db.threads);
+});
+
+// Full activity feed for the admin console, merged from every device: activity
+// events (sign-ups, logins, deposits, withdrawals) plus the raw login history,
+// newest first. The console polls this so nothing is ever missed.
+app.get('/api/admin/activity', adminMiddleware, (_, res) => {
+  const fromActivity = (db.activityEvents || []).map(e => ({
+    id: e.id, userId: e.userId || '', email: e.email || '',
+    name: e.name || (db.users.find(u => u.id === e.userId) || {}).name || e.email || '',
+    action: e.action || 'login', via: e.via || 'email', at: e.at || '', details: e.details || {},
+  }));
+  const fromLogins = (db.loginEvents || []).map(e => ({
+    id: e.id, userId: e.userId || '', email: e.email || '',
+    name: (db.users.find(u => u.id === e.userId) || {}).name || e.email || '',
+    action: 'login', via: 'email', at: e.loggedInAt || '', details: {},
+  }));
+  const seen = new Set();
+  const merged = [...fromActivity, ...fromLogins]
+    .filter(e => {
+      if (!e.at || seen.has(e.id)) return false;
+      seen.add(e.id);
+      return true;
+    })
+    .sort((a, b) => (a.at < b.at ? 1 : -1))
+    .slice(0, 400);
+  res.json(merged);
 });
 
 // Login history for one user, newest first. The admin console lists these under
