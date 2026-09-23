@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
-import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
+import { getUsers, getActivity, getThreads, getThreadMessages, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
 import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, createAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, getAdminActivity, type AdminLoginEvent } from '../../lib/api';
 import { subscribeToChat, closeChatStream, type ChatEvent } from '../../lib/chatTransport';
 import { fmtDateTime } from '../../lib/format';
@@ -205,6 +205,7 @@ export default function AdminConsole() {
   // threadId -> true while that customer is currently typing.
   const [typingMap, setTypingMap] = useState<Record<string, boolean>>({});
   const typingSentAtRef = useRef(0);
+  const sendingReplyRef = useRef(false);
   // serverId -> per-user login history shown under each Users row.
   const [loginCounts, setLoginCounts] = useState<LoginCountMap>({});
   const [expandedLogins, setExpandedLogins] = useState<Record<string, boolean>>({});
@@ -398,19 +399,21 @@ export default function AdminConsole() {
 
   async function sendReply() {
     const text = chatInput.trim();
-    if (!text || !activeThread) return;
+    if (!text || !activeThread || sendingReplyRef.current) return;
+    sendingReplyRef.current = true;
     setEmojiOpen(false);
     const id = activeThread;
-    const thread = threads.find(t => t.id === id) || getThreads().find(t => t.id === id);
     const stamp = new Date().toISOString();
     setChatInput('');
     // WhatsApp habit: your reply appears immediately, then the server copy replaces it.
     setMessages(prev => [...prev, { id: `admin${Date.now()}`, from: 'admin', text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), at: stamp }]);
-    await replyThread(id, text);
-    pushChatMessage(id, thread ? thread.user : 'Customer', thread ? thread.email : '', text, 'admin');
-    markThreadRead(id);
-    setMessages(await loadMessages(id));
-    await loadThreads();
+    try {
+      await replyThread(id, text);
+      markThreadRead(id);
+      setMessages(await loadMessages(id));
+      await loadThreads();
+    } catch { /* keep the optimistic message visible */ }
+    sendingReplyRef.current = false;
   }
 
   async function toggleLogins(serverId?: string) {

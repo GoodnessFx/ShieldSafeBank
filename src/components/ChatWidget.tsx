@@ -160,6 +160,9 @@ export default function ChatWidget() {
     return [...serverMsgs, ...extras];
   }
 
+  // Track messages already synced/in-flight so we never re-upload the same text.
+  const syncedTextsRef = useRef<Set<string>>(new Set());
+
   // Recovery: a message written while no backend was reachable only ever existed
   // in that browser. When the server IS reachable we upload anything the server
   // is missing (matched on text, so the same words are never uploaded twice),
@@ -168,8 +171,11 @@ export default function ChatWidget() {
     const localMsgs = getThreadMessages(who.id);
     if (localMsgs.length === 0) return false;
     const known = new Set(serverMsgs.map(messageKey));
-    const missing = localMsgs.filter(m => !known.has(messageKey(m)));
-    for (const m of missing) sendChatMessage(m.text).catch(() => null);
+    const missing = localMsgs.filter(m => !known.has(messageKey(m)) && !syncedTextsRef.current.has(messageKey(m)));
+    for (const m of missing) {
+      syncedTextsRef.current.add(messageKey(m));
+      sendChatMessage(m.text).catch(() => { syncedTextsRef.current.delete(messageKey(m)); });
+    }
     return missing.length > 0;
   }
 

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Link } from 'react-router';
-import { chatIdentity, pushChatMessage } from '../lib/localStore';
+import { chatIdentity } from '../lib/localStore';
 import { submitSupportMessage, sendChatMessage } from '../lib/api';
 
 const FAQ: Record<string, { q: string; a: string }[]> = {
@@ -47,6 +47,7 @@ export default function Support() {
     message: '',
   });
   const [sent, setSent] = useState(false);
+  const sendingRef = useRef(false);
 
   return (
     <>
@@ -118,7 +119,7 @@ export default function Support() {
               <Link to="/login" style={{ display: 'inline-block', background: '#123C7C', color: '#fff', padding: '12px 28px', fontWeight: 600, fontSize: '14px', textDecoration: 'none' }}>Sign in</Link>
             </div>
           ) : (
-            <form onSubmit={e => { e.preventDefault(); if (!signedIn) return; const who = chatIdentity(); sendChatMessage(formState.message); submitSupportMessage({ name: who.user || formState.name, email: who.email, category: formState.category, message: formState.message }); pushChatMessage(who.id, who.user, who.email, formState.message, 'user'); setSent(true); }} style={{ display: 'flex', flexDirection: 'column', gap: '16px', background: '#fff', border: '1px solid #DCE3EA', padding: '32px' }}>
+            <form onSubmit={async (e) => { e.preventDefault(); if (!signedIn || sendingRef.current) return; sendingRef.current = true; const who = chatIdentity(); try { await sendChatMessage(formState.message); await submitSupportMessage({ name: who.user || formState.name, email: who.email, category: formState.category, message: formState.message }); } catch { /* still mark sent so UI shows confirmation */ } setSent(true); sendingRef.current = false; }} style={{ display: 'flex', flexDirection: 'column', gap: '16px', background: '#fff', border: '1px solid #DCE3EA', padding: '32px' }}>
               <p style={{ fontSize: '12px', color: '#6B7280', fontFamily: 'IBM Plex Mono, monospace', margin: '0 0 4px' }}>Contacting as {formState.email}</p>
               <div className="grid sm:grid-cols-2 gap-4">
                 <Field label="Full name" value={formState.name} onChange={v => setFormState(f => ({ ...f, name: v }))} type="text" required />
