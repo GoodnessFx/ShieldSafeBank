@@ -172,3 +172,50 @@ npm start                   # serves dist/ on http://localhost:3000
 On localhost the app calls `/api`, which `node start.mjs` does not proxy; the
 API layer's localhost fallback then reaches `http://localhost:4000/api`
 directly, so the shared server must still be running.
+
+## 5. Email delivery (Resend)
+
+Password-reset links and email-verification codes are sent via
+[Resend](https://resend.com). The server only attempts to send when
+`RESEND_API_KEY` is present — without it the endpoint returns a `500` with a
+clear error so the user is never told "check your email" when nothing was sent.
+
+### Environment variables (set on the **shieldsafebank-api** service in Render)
+
+| Variable | Required | Notes |
+|---|---|---|
+| `RESEND_API_KEY` | **Yes** for email | Get from Resend dashboard → API Keys. Never commit to git. |
+| `APP_URL` | Recommended | Base URL of the **frontend** (e.g. `https://shieldsafebank.com`). Used to build the `/reset-password?token=…` link in the reset email. Defaults to `https://shieldsafebank.com` if not set. |
+
+### Adding the variables on Render
+
+1. Open **shieldsafebank-api → Environment → Environment Variables**.
+2. Add `RESEND_API_KEY` with the value from your Resend dashboard.
+3. Add `APP_URL` with your frontend URL (no trailing slash).
+4. Click **Save Changes** — Render restarts the service automatically.
+
+### Domain verification in Resend (required before emails deliver)
+
+Resend will not deliver mail from `no-reply@shieldsafebank.com` until the
+domain is verified:
+
+1. In the [Resend dashboard](https://resend.com) go to **Domains → Add Domain**
+   and enter `shieldsafebank.com`.
+2. Resend shows you three DNS records to add (SPF, DKIM × 2). Add them at your
+   DNS registrar (the exact steps depend on your registrar — it is usually
+   under *Advanced DNS* or *TXT records*).
+3. Click **Verify** in Resend — it may take a few minutes for DNS to propagate.
+4. Once the domain shows **Verified** you can send from any address at that
+   domain, including `no-reply@shieldsafebank.com`.
+
+> **Note:** During development you can use Resend's own test domain
+> (`onboarding@resend.dev`) by changing the `from` address in
+> `server/index.js`. Emails sent from the test domain only deliver to the
+> address that owns the Resend account.
+
+### What happens when RESEND_API_KEY is absent
+
+- `POST /api/auth/forgot-password` → `500 { error: "Email service is not configured on this server." }`
+- `POST /api/auth/send-verification` → same `500` response
+- The frontend shows the server's error message to the user — no false
+  "check your email" screen.

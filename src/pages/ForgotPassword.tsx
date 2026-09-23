@@ -7,11 +7,18 @@ export default function ForgotPassword() {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    forgotPassword(email).then(() => { setLoading(false); setSent(true); });
+    setError('');
+    forgotPassword(email)
+      .then(() => { setSent(true); })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      })
+      .finally(() => { setLoading(false); });
   }
 
   return (
@@ -38,6 +45,11 @@ export default function ForgotPassword() {
               <>
                 <h1 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '22px', color: '#0A2044', margin: '0 0 8px' }}>Reset your password</h1>
                 <p style={{ fontSize: '14px', color: '#6B7280', margin: '0 0 24px' }}>Enter your account email and we will send a reset link.</p>
+                {error && (
+                  <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '2px', padding: '10px 14px', marginBottom: '16px', fontSize: '13px', color: '#B91C1C' }}>
+                    {error}
+                  </div>
+                )}
                 <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   <div>
                     <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4779C4', display: 'block', marginBottom: '6px' }}>Email address</label>

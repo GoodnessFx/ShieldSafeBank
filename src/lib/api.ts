@@ -233,7 +233,27 @@ export async function googleAuth(email: string, name: string, idToken = '') {
 }
 
 export async function forgotPassword(email: string) {
-  return apiFetch('/auth/forgot-password', { method: 'POST', body: { email } });
+  const r = await apiFetch('/auth/forgot-password', { method: 'POST', body: { email } });
+  if (!r.ok) throw new Error((r.data && r.data.error) || 'Failed to send reset email.');
+  return r;
+}
+
+export async function resetPassword(token: string, password: string) {
+  const r = await apiFetch('/auth/reset-password', { method: 'POST', body: { token, password } });
+  if (!r.ok) throw new Error((r.data && r.data.error) || 'Failed to reset password.');
+  return r;
+}
+
+export async function sendVerification() {
+  const r = await apiFetch('/auth/send-verification', { method: 'POST', body: {} });
+  if (!r.ok) throw new Error((r.data && r.data.error) || 'Failed to send verification email.');
+  return r;
+}
+
+export async function verifyEmailWithCode(code: string) {
+  const r = await apiFetch('/auth/verify-email', { method: 'POST', body: { code } });
+  if (!r.ok) throw new Error((r.data && r.data.error) || 'Verification failed.');
+  return r;
 }
 
 /**

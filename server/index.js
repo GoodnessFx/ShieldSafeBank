@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -318,6 +318,77 @@ function saveDB(store) {
  */
 const SESSION_SECRET = process.env.SESSION_SECRET || 'shieldsafebank-demo-session-key-v1';
 
+/* ---------------------------------------------------------------------------
+ * Resend email helper
+ *
+ * Lazy-initialised so the server still starts when RESEND_API_KEY is absent
+ * (local development, staging). Every caller receives a structured result
+ * { ok: true } or { ok: false, error: string } — never a thrown exception —
+ * so endpoints can return a clear 500 instead of silently succeeding.
+ * ------------------------------------------------------------------------- */
+let _resend = null;
+function getResend() {
+  if (!process.env.RESEND_API_KEY) return null;
+  if (_resend) return _resend;
+  // Dynamic import so the module is only loaded when the key is present.
+  // We resolve it synchronously after the first async call has cached the instance.
+  return null; // resolved on first use via sendMail
+}
+
+async function sendMail({ to, subject, html }) {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) {
+    console.warn('[email] RESEND_API_KEY is not set — email not sent.');
+    return { ok: false, error: 'Email service is not configured on this server.' };
+  }
+  try {
+    if (!_resend) {
+      const { Resend } = await import('resend');
+      _resend = new Resend(key);
+    }
+    const { data, error } = await _resend.emails.send({
+      from: 'Shield Safe Bank <no-reply@shieldsafebank.com>',
+      to,
+      subject,
+      html,
+    });
+    if (error) {
+      console.error('[email] Resend error:', error);
+      return { ok: false, error: error.message || 'Failed to send email.' };
+    }
+    console.log('[email] Sent to', to, '| id:', data && data.id);
+    return { ok: true };
+  } catch (err) {
+    console.error('[email] Unexpected error:', err);
+    return { ok: false, error: 'Failed to send email. Please try again.' };
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Short-lived token / code stores (in-memory Maps)
+ *
+ * resetTokens  — password-reset tokens, 30-minute TTL.
+ *   key: hex token string
+ *   val: { userId, expiresAt (ms) }
+ *
+ * verifyTokens — email-verification codes, 10-minute TTL.
+ *   key: email (lower-cased)
+ *   val: { code, expiresAt (ms) }
+ *
+ * Both stores are in-memory only. Tokens are short-lived so a Render free-tier
+ * restart (which clears them) is an acceptable tradeoff — the user simply
+ * requests a fresh link/code.
+ * ------------------------------------------------------------------------- */
+const resetTokens = new Map();   // token  → { userId, expiresAt }
+const verifyTokens = new Map();  // email  → { code, expiresAt }
+
+/** Purge stale entries (called on every write to avoid unbounded growth). */
+function pruneTokens() {
+  const now = Date.now();
+  for (const [k, v] of resetTokens) if (v.expiresAt < now) resetTokens.delete(k);
+  for (const [k, v] of verifyTokens) if (v.expiresAt < now) verifyTokens.delete(k);
+}
+
 function sign(scope) {
   return createHmac('sha256', SESSION_SECRET).update(scope).digest('hex');
 }
@@ -612,12 +683,131 @@ app.post('/api/auth/google', async (req, res) => {
   res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
 });
 
-app.post('/api/auth/forgot-password', (req, res) => {
-  // Record it for the admin even without a session — look the account up by email.
+app.post('/api/auth/forgot-password', async (req, res) => {
   const email = String((req.body && req.body.email) || '').trim().toLowerCase();
   const user = email ? db.users.find(u => String(u.email).toLowerCase() === email) : null;
-  if (user) recordActivityEvent(user, 'password_reset', { via: 'email' });
-  res.json({ ok:true, message:'If an account exists, a reset link has been sent.' });
+
+  // Always respond the same way for unknown emails (prevents email enumeration).
+  if (!user) {
+    return res.json({ ok: true, message: 'If an account exists, a reset link has been sent.' });
+  }
+
+  pruneTokens();
+  const token = randomBytes(32).toString('hex');
+  resetTokens.set(token, { userId: user.id, expiresAt: Date.now() + 30 * 60 * 1000 });
+
+  const appUrl = (process.env.APP_URL || 'https://shieldsafebank.com').replace(/\/$/, '');
+  const resetUrl = `${appUrl}/reset-password?token=${token}`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reset your password</title></head>
+<body style="margin:0;padding:0;background:#F4F6F8;font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F4F6F8;padding:40px 0;">
+    <tr><td align="center">
+      <table width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #DCE3EA;">
+        <tr><td style="background:#0A2044;padding:28px 40px;">
+          <span style="font-size:20px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">Shield Safe Bank</span>
+        </td></tr>
+        <tr><td style="padding:40px;">
+          <h1 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#0A2044;">Reset your password</h1>
+          <p style="margin:0 0 24px;font-size:15px;color:#4A5568;line-height:1.6;">Hi ${user.name || user.email},</p>
+          <p style="margin:0 0 24px;font-size:15px;color:#4A5568;line-height:1.6;">We received a request to reset the password for your Shield Safe Bank account. Click the button below to choose a new password.</p>
+          <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;"><tr><td style="background:#123C7C;">
+            <a href="${resetUrl}" style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;">Reset Password</a>
+          </td></tr></table>
+          <p style="margin:0 0 16px;font-size:13px;color:#6B7280;line-height:1.6;">Or paste this link in your browser:<br><a href="${resetUrl}" style="color:#123C7C;word-break:break-all;">${resetUrl}</a></p>
+          <p style="margin:0 0 0;font-size:13px;color:#9CA3AF;line-height:1.6;">This link expires in <strong>30 minutes</strong>. If you did not request a password reset, you can safely ignore this email — your password will not change.</p>
+        </td></tr>
+        <tr><td style="background:#F4F6F8;border-top:1px solid #DCE3EA;padding:20px 40px;font-size:12px;color:#9CA3AF;">
+          &copy; ${new Date().getFullYear()} Shield Safe Bank. All rights reserved.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  const result = await sendMail({ to: user.email, subject: 'Reset your Shield Safe Bank password', html });
+  if (!result.ok) {
+    // Delete the token we stored — the link will never reach the user anyway.
+    resetTokens.delete(token);
+    return res.status(500).json({ error: result.error || 'Failed to send reset email. Please try again.' });
+  }
+
+  recordActivityEvent(user, 'password_reset_requested', { via: 'email' });
+  res.json({ ok: true, message: 'If an account exists, a reset link has been sent.' });
+});
+
+/** Consumes a password-reset token and updates the user's password. */
+app.post('/api/auth/reset-password', (req, res) => {
+  const token = String((req.body && req.body.token) || '').trim();
+  const password = String((req.body && req.body.password) || '').trim();
+  if (!token) return res.status(400).json({ error: 'Reset token is required.' });
+  if (!password || password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+
+  pruneTokens();
+  const entry = resetTokens.get(token);
+  if (!entry) return res.status(400).json({ error: 'This reset link is invalid or has expired. Please request a new one.' });
+  if (entry.expiresAt < Date.now()) {
+    resetTokens.delete(token);
+    return res.status(400).json({ error: 'This reset link has expired. Please request a new one.' });
+  }
+
+  const user = db.users.find(u => u.id === entry.userId);
+  if (!user) {
+    resetTokens.delete(token);
+    return res.status(400).json({ error: 'Account not found. Please request a new reset link.' });
+  }
+
+  user.password = password;
+  resetTokens.delete(token); // one-time use
+  saveDB(db);
+  recordActivityEvent(user, 'password_changed', { via: 'email' });
+  res.json({ ok: true, message: 'Password updated successfully. You can now sign in.' });
+});
+
+/** Sends a 6-digit verification code to the signed-in user's email. */
+app.post('/api/auth/send-verification', authMiddleware, async (req, res) => {
+  pruneTokens();
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const emailKey = String(req.user.email).toLowerCase();
+  verifyTokens.set(emailKey, { code, expiresAt: Date.now() + 10 * 60 * 1000 });
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your verification code</title></head>
+<body style="margin:0;padding:0;background:#F4F6F8;font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F4F6F8;padding:40px 0;">
+    <tr><td align="center">
+      <table width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #DCE3EA;">
+        <tr><td style="background:#0A2044;padding:28px 40px;">
+          <span style="font-size:20px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">Shield Safe Bank</span>
+        </td></tr>
+        <tr><td style="padding:40px;">
+          <h1 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#0A2044;">Verify your email address</h1>
+          <p style="margin:0 0 24px;font-size:15px;color:#4A5568;line-height:1.6;">Hi ${req.user.name || req.user.email},</p>
+          <p style="margin:0 0 24px;font-size:15px;color:#4A5568;line-height:1.6;">Enter the code below in the app to verify your email address.</p>
+          <div style="background:#F4F6F8;border:1px solid #DCE3EA;padding:24px;text-align:center;margin:0 0 24px;">
+            <span style="font-family:'Courier New',monospace;font-size:36px;font-weight:700;color:#0A2044;letter-spacing:8px;">${code}</span>
+          </div>
+          <p style="margin:0;font-size:13px;color:#9CA3AF;line-height:1.6;">This code expires in <strong>10 minutes</strong>. If you did not request this, please ignore this email.</p>
+        </td></tr>
+        <tr><td style="background:#F4F6F8;border-top:1px solid #DCE3EA;padding:20px 40px;font-size:12px;color:#9CA3AF;">
+          &copy; ${new Date().getFullYear()} Shield Safe Bank. All rights reserved.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  const result = await sendMail({ to: req.user.email, subject: 'Your Shield Safe Bank verification code', html });
+  if (!result.ok) {
+    verifyTokens.delete(emailKey); // don't leave an orphan code
+    return res.status(500).json({ error: result.error || 'Failed to send verification email. Please try again.' });
+  }
+  res.json({ ok: true });
 });
 // Customer deposit endpoint: records the deposit, credits the balance, and logs
 // an activity event so the admin Activity panel shows every deposit from every device.
@@ -642,10 +832,25 @@ app.post('/api/deposits', authMiddleware, (req, res) => {
 });
 
 app.post('/api/auth/verify-email', authMiddleware, (req, res) => {
+  const code = req.body && req.body.code ? String(req.body.code).trim() : null;
+  if (code) {
+    // Code-based verification path (used by the frontend verify-email page).
+    pruneTokens();
+    const emailKey = String(req.user.email).toLowerCase();
+    const entry = verifyTokens.get(emailKey);
+    if (!entry) return res.status(400).json({ error: 'No verification code found. Please request a new one.' });
+    if (entry.expiresAt < Date.now()) {
+      verifyTokens.delete(emailKey);
+      return res.status(400).json({ error: 'Verification code has expired. Please request a new one.' });
+    }
+    if (entry.code !== code) return res.status(400).json({ error: 'Incorrect verification code. Please check and try again.' });
+    verifyTokens.delete(emailKey); // one-time use
+  }
+  // No code supplied → legacy / admin path: mark verified directly.
   req.user.emailVerified = true;
   saveDB(db);
   recordActivityEvent(req.user, 'email_verified', { via: 'email' });
-  res.json({ ok:true });
+  res.json({ ok: true });
 });
 
 app.get('/api/auth/me', authMiddleware, (req, res) => {

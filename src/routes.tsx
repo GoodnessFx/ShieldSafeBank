@@ -13,6 +13,7 @@ import Legal from './pages/Legal';
 import Login from './pages/Login';
 import SignUp from './pages/SignUp';
 import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import EmailVerification from './pages/EmailVerification';
 import Dashboard from './pages/Dashboard';
 import NotFound from './pages/NotFound';
@@ -36,6 +37,7 @@ export const router = createBrowserRouter([
       { path: 'login', Component: Login },
       { path: 'signup', Component: SignUp },
       { path: 'forgot-password', Component: ForgotPassword },
+      { path: 'reset-password', Component: ResetPassword },
       { path: 'verify-email', Component: EmailVerification },
       { path: 'dashboard', Component: Dashboard },
       { path: '*', Component: NotFound },
