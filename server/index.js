@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createHmac, timingSafeEqual, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { MAIL_FROM } from './email-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -326,9 +327,41 @@ const SESSION_SECRET = process.env.SESSION_SECRET || 'shieldsafebank-demo-sessio
  * { ok: true } or { ok: false, error: string } — never a thrown exception —
  * so endpoints can return a clear 500 instead of silently succeeding.
  * ------------------------------------------------------------------------- */
+/**
+ * Reads the API key through one helper so a value pasted into a hosting
+ * dashboard with stray spaces, newlines or surrounding quotes still works.
+ * Whitespace is removed *before* the quotes are stripped — otherwise
+ * `  "re_abc"  ` would keep its quotes and Resend would answer
+ * "API key is invalid".
+ */
+function resendApiKey() {
+  return String(process.env.RESEND_API_KEY || '')
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .trim();
+}
+
+/**
+ * A revoked, malformed or restricted key is the operator's problem: the server
+ * log keeps the full Resend error while the customer receives a message that
+ * makes sense to them — "API key is invalid" is not actionable for someone
+ * waiting on a verification code. Resend answers 401 for a revoked key but 400
+ * for a malformed one, so the message is checked as well as the status.
+ */
+function emailErrorMessage(error) {
+  const message = (error && error.message) || '';
+  const status = error && error.statusCode;
+  const credentialProblem = error
+    && (error.name === 'restricted_api_key' || status === 401 || /api key/i.test(message));
+  if (credentialProblem) {
+    return 'Email service is temporarily unavailable. Please try again in a few minutes.';
+  }
+  return message || 'Failed to send email.';
+}
+
 let _resend = null;
 function getResend() {
-  if (!process.env.RESEND_API_KEY) return null;
+  if (!resendApiKey()) return null;
   if (_resend) return _resend;
   // Dynamic import so the module is only loaded when the key is present.
   // We resolve it synchronously after the first async call has cached the instance.
@@ -336,7 +369,7 @@ function getResend() {
 }
 
 async function sendMail({ to, subject, html }) {
-  const key = process.env.RESEND_API_KEY;
+  const key = resendApiKey();
   if (!key) {
     console.warn('[email] RESEND_API_KEY is not set — email not sent.');
     return { ok: false, error: 'Email service is not configured on this server.' };
@@ -347,14 +380,14 @@ async function sendMail({ to, subject, html }) {
       _resend = new Resend(key);
     }
     const { data, error } = await _resend.emails.send({
-      from: 'Shield Safe Bank <no-reply@shieldsafebank.com>',
+      from: MAIL_FROM,
       to,
       subject,
       html,
     });
     if (error) {
       console.error('[email] Resend error:', error);
-      return { ok: false, error: error.message || 'Failed to send email.' };
+      return { ok: false, error: emailErrorMessage(error) };
     }
     console.log('[email] Sent to', to, '| id:', data && data.id);
     return { ok: true };

@@ -180,11 +180,17 @@ Password-reset links and email-verification codes are sent via
 `RESEND_API_KEY` is present — without it the endpoint returns a `500` with a
 clear error so the user is never told "check your email" when nothing was sent.
 
+Both messages come from `no-reply@shieldsafebank.com` (single source of truth:
+`MAILBOX` / `MAIL_FROM` in `server/email-config.js`), which is why that domain
+must be **verified in Resend** before any code or reset link can be delivered —
+see *Domain verification* below, and check your progress at any time with
+`npm run check-email` inside `server/`.
+
 ### Environment variables (set on the **shieldsafebank-api** service in Render)
 
 | Variable | Required | Notes |
 |---|---|---|
-| `RESEND_API_KEY` | **Yes** for email | Get from Resend dashboard → API Keys. Never commit to git. |
+| `RESEND_API_KEY` | **Yes** for email | Get from Resend dashboard → API Keys. **Sending access** is enough for the server itself; a **Full access** key is only needed by `check-email-dns.js` to read the record list and verification status. Never commit to git. |
 | `APP_URL` | Recommended | Base URL of the **frontend** (e.g. `https://shieldsafebank.com`). Used to build the `/reset-password?token=…` link in the reset email. Defaults to `https://shieldsafebank.com` if not set. |
 
 ### Adding the variables on Render
@@ -196,26 +202,149 @@ clear error so the user is never told "check your email" when nothing was sent.
 
 ### Domain verification in Resend (required before emails deliver)
 
-Resend will not deliver mail from `no-reply@shieldsafebank.com` until the
-domain is verified:
+**Status: the API key is live, the domain is not verified.** A probe of the
+deployed API on 2026-09-24 returned the Resend error rather than "Email service
+is not configured on this server":
 
-1. In the [Resend dashboard](https://resend.com) go to **Domains → Add Domain**
-   and enter `shieldsafebank.com`.
-2. Resend shows you three DNS records to add (SPF, DKIM × 2). Add them at your
-   DNS registrar (the exact steps depend on your registrar — it is usually
-   under *Advanced DNS* or *TXT records*).
-3. Click **Verify** in Resend — it may take a few minutes for DNS to propagate.
-4. Once the domain shows **Verified** you can send from any address at that
-   domain, including `no-reply@shieldsafebank.com`.
+```
+POST /api/auth/forgot-password  →  500
+{"error":"The shieldsafebank.com domain is not verified. Please, add and verify your domain on https://resend.com/domains"}
+```
 
-> **Note:** During development you can use Resend's own test domain
-> (`onboarding@resend.dev`) by changing the `from` address in
-> `server/index.js`. Emails sent from the test domain only deliver to the
-> address that owns the Resend account.
+That proves `RESEND_API_KEY` is correct and sending — only the DNS records are
+missing (`send.`, `rsend.`, `resend._domainkey.` and `_dmarc.` all return
+NXDOMAIN). Until they exist **no verification code or reset link reaches
+anybody**: the endpoint stores the code, the send fails, the code is deleted
+again, and the user sees the error above.
 
-### What happens when RESEND_API_KEY is absent
+#### Step 1 — see the current state
 
-- `POST /api/auth/forgot-password` → `500 { error: "Email service is not configured on this server." }`
-- `POST /api/auth/send-verification` → same `500` response
-- The frontend shows the server's error message to the user — no false
-  "check your email" screen.
+```
+cd server
+node check-email-dns.js        # npm run check-email
+```
+
+Put a key in the git-ignored `server/.env` first. A **Full access** key lets the
+script read the expected records and the verification status straight from
+Resend; a **Sending access** key (or no key) still runs every DNS check and
+still allows `--send-test`, it just falls back to the standard record set. Exit
+code 0 means everything is in place. Re-run it after every DNS change.
+
+#### Step 2 — add the domain in Resend
+
+[resend.com/domains](https://resend.com/domains) → **Add Domain** →
+`shieldsafebank.com`. Leave the region on the default (`us-east-1`) unless you
+change it deliberately — it decides which `feedback-smtp` hostname the MX record
+must point at. Keep the page open: the **Value** column holds long strings that
+must be copied verbatim.
+
+#### Step 3 — add the records at your DNS provider
+
+DNS for this domain is hosted by **Global Domain Group LLC**
+(`ns1`/`ns2.globaldomaingroup.com`, registrar IANA 3956). Global Domain Group is
+a white-label registrar, so there is no GDG login: records are edited in the
+panel the domain was bought from, under *Domain Names → shieldsafebank.com →
+Manage DNS Records* (often *Advanced DNS*). The root domain has no TXT or MX
+records at all today, so all four below are new:
+
+| Type | Host (paste this) | Full record name | Value (target) |
+| --- | --- | --- | --- |
+| TXT | `resend._domainkey` | `resend._domainkey.shieldsafebank.com` | `p=MIGfMA0GCS…` — copy the **whole** key from Resend |
+| CNAME | `send` | `send.shieldsafebank.com` | `send.forge.rmta.net` |
+| CNAME | `rsend` | `rsend.shieldsafebank.com` | `rsend-euw1.forge.rmta.net` |
+| TXT | `_dmarc` | `_dmarc.shieldsafebank.com` | `v=DMARC1; p=none;` |
+
+This is the **EU (eu-west-1)** set, which is what the 🇪🇺 domain in the dashboard
+uses. Other regions publish an **MX + TXT** pair on `send`
+(`feedback-smtp.<region>.amazonses.com` with priority 10) instead of those two
+CNAMEs — `check-email-dns.js` accepts either form, and always trust the values
+Resend shows over any example here.
+
+- **Copy the Value column from Resend, not these examples** — the DKIM key is
+  generated for the domain and is unique to it.
+- Use **Host** when the panel already appends the domain name, **Full record
+  name** when it asks for the complete name. Pasting
+  `send.shieldsafebank.com` into a panel that appends the domain creates
+  `send.shieldsafebank.com.shieldsafebank.com` — the script detects and reports
+  exactly that mistake.
+- `send` and `rsend` are **CNAMEs**: a CNAME cannot coexist with any other
+  record at the same name, so do not also add an MX or TXT record called `send`.
+  Empty the target field except for the hostname itself (`send.forge.rmta.net`)
+  — no `https://`, no path, no trailing dot.
+- No trailing dot on values, and leave proxying/"cloud" off if the panel offers it.
+- `_dmarc` is recommended, not required: verification succeeds without it, but
+  it is what stops others spoofing the domain.
+- If the domain already publishes an SPF record, **merge** the Resend include
+  into that one record instead of adding a second SPF record — two SPF records
+  break SPF entirely.
+
+#### Step 4 — verify
+
+1. Resend re-checks on its own, or click **Verify DNS Records** on the domain page.
+2. Allow a few minutes for propagation; Resend tolerates up to 72 hours.
+3. Confirm with `node check-email-dns.js` (exit code 0), then prove real delivery:
+
+```
+node check-email-dns.js --send-test you@example.com
+```
+
+4. Sign in as a customer, open the email-verification page and press **Send
+   verification code** — the 6-digit code (10-minute TTL) should arrive.
+
+> Development shortcut: while the domain is unverified you can send from
+> Resend's test domain by changing `MAILBOX` in `server/email-config.js` to
+> `onboarding@resend.dev`. Mail from that address only reaches the mailbox that
+> owns the Resend account, so it cannot serve real customers.
+
+### What the API returns when email cannot be sent
+
+`sendMail()` never throws — it returns `{ ok: false, error }`, and both email
+endpoints delete the token/code they just stored before answering `500`, so a
+failed send never leaves an orphan code. The frontend shows the server's message
+verbatim, so there is no false "check your email" screen.
+
+| Situation | Endpoints | Response |
+| --- | --- | --- |
+| `RESEND_API_KEY` not set | `POST /api/auth/forgot-password`, `POST /api/auth/send-verification` | `500 { error: "Email service is not configured on this server." }` |
+| Key set, domain **not** verified | both | `500 { error: "The shieldsafebank.com domain is not verified. Please, add and verify your domain on https://resend.com/domains" }` |
+| Key invalid, revoked, or restricted | both | `500 { error: "Email service is temporarily unavailable. Please try again in a few minutes." }` — the real Resend error (`API key is invalid`, 401) is written to the server log only, because it is not actionable for a customer |
+| Domain verified, key valid | both | `200 { ok: true }` and the mail is delivered |
+
+#### `[email] Resend error: API key is invalid` in the Render log
+
+A 401 means the key the server is holding was never valid **or** no longer
+exists in Resend — usually because it was deleted or rotated in the dashboard
+and Render was never updated. It is **not** a domain problem: check
+`https://resend.com/domains` first (it should read *Verified*), then fix the key.
+
+> **Check the prefix before anything else.** Resend keys start with **`re_`**.
+> A value starting with **`rnd_`** is a **Render** API key — it authenticates
+> against `api.render.com`, not Resend, and every Resend call answers
+> `API key is invalid`. It was copied from Render → Account Settings → API Keys
+> instead of Resend → API Keys. Revoke such a key: it can read environment
+> variables and redeploy services.
+
+1. Resend → **API Keys** → **Create API Key** (**Sending access** is enough for
+   this server) and copy the `re_…` value — it is shown once.
+2. Prove the key works *before* saving it anywhere:
+
+```
+node --input-type=module -e "const k='PASTE_KEY_HERE'; const r=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+k,'Content-Type':'application/json'},body:JSON.stringify({from:'Shield Safe Bank <no-reply@shieldsafebank.com>',to:'delivered@resend.dev',subject:'key test',html:'<p>ok</p>'})}); console.log(r.status, await r.text())"
+```
+
+   Expect `200 {"id":"…"}`. A `401`/`400` means it is the wrong key — do not put
+   it on Render.
+3. Render → **shieldsafebank-api → Environment** → edit `RESEND_API_KEY` and
+   paste the new value. Paste it plainly: a stray leading/trailing space, a
+   newline, or wrapping quotes are also classic causes of `API key is invalid`
+   (the server strips spaces and quotes defensively, but a typo still fails).
+4. **Save Changes** — Render restarts the service.
+5. Verify end to end:
+
+```
+node check-email-dns.js --send-test you@example.com
+```
+
+Any 401 is logged as `[email] Resend error: {...}` with the full Resend payload,
+so the Render log always shows the real cause even though the customer sees a
+neutral message.

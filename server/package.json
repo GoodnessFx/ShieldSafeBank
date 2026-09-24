@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "migrate": "node migrate-store.js"
+    "migrate": "node migrate-store.js",
+    "check-email": "node check-email-dns.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
