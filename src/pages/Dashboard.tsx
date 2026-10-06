@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../lib/config';
-import { getMe, getTransactions, requestWithdrawal, submitDeposit, updateProfile, trackUserActivity, type MeData, type TransactionData } from '../lib/api';
+import { getMe, getTransactions, requestWithdrawal, submitDeposit, updateProfile, trackUserActivity, getMyCardTracking, type MeData, type TransactionData, type CardTrackingData } from '../lib/api';
 import { fmtUSD, fmtDateTimeShort, toAmount, fmtText } from '../lib/format';
 import CardScanner, { readCardScan, writeCardScan, type CardScanResult } from '../components/CardScanner';
+import CardTracking from '../components/CardTracking';
 import Toast, { type ToastData } from '../components/Toast';
 
 const BTC_ADDR = DEPOSIT_ADDRESSES.BTC;
@@ -66,6 +67,7 @@ export default function Dashboard() {
   const [cardScan, setCardScan] = useState<CardScanResult | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastData[]>([]);
+  const [cardTracking, setCardTracking] = useState<CardTrackingData | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState('');
@@ -157,6 +159,8 @@ export default function Dashboard() {
       }
       const t = await getTransactions();
       if (!cancelled && t.ok && t.data) setTxs(t.data.map(mapTx));
+      const tr = await getMyCardTracking();
+      if (!cancelled && tr.ok && tr.data && tr.data.tracking) setCardTracking(tr.data.tracking);
     })();
     return () => { cancelled = true; };
   }, []);
@@ -221,7 +225,7 @@ export default function Dashboard() {
         <div style={{ background: '#0B2B5C', borderBottom: '1px solid #0A2044' }}>
           <div className="max-w-6xl mx-auto px-4 sm:px-6 h-11 flex items-center justify-between">
             <nav className="dash-rail" style={{ display: 'flex', gap: '24px' }}>
-              {['Overview', 'My Card', 'Deposit', 'Withdraw', 'History'].map(t => (
+              {['Overview', 'My Card', 'Tracking', 'Deposit', 'Withdraw', 'History'].map(t => (
                 <a key={t} href={`#${t === 'My Card' ? 'card' : t.toLowerCase()}`} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#A9C6E8', textDecoration: 'none', letterSpacing: '0.04em', transition: 'color 0.12s' }}
                   onMouseEnter={e => { (e.target as HTMLElement).style.color = '#fff'; }}
                   onMouseLeave={e => { (e.target as HTMLElement).style.color = '#A9C6E8'; }}>
@@ -383,8 +387,53 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {kycPending ? (
-            <div style={{ background: '#FFFBEB', border: '1px solid #F59E0B', padding: '32px', display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+          {/* Card delivery tracking */}
+          <div id="tracking" style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '28px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap', marginBottom: '24px' }}>
+              <div>
+                <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#0A2044', margin: '0 0 4px' }}>Card Delivery Tracking</h2>
+                <p style={{ fontSize: '13px', color: '#6B7280', margin: 0 }}>
+                  Real-time status of your Shield Safe Bank card delivery.
+                </p>
+              </div>
+              {cardTracking && (
+                <span style={{
+                  fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600,
+                  color: cardTracking.step === 4 ? '#1E7A4C' : '#4779C4',
+                  background: cardTracking.step === 4 ? '#F0FDF4' : '#EEF2FA',
+                  border: `1px solid ${cardTracking.step === 4 ? '#BBF7D0' : '#C7D5EE'}`,
+                  padding: '4px 12px',
+                }}>
+                  {cardTracking.step === 4 ? 'DELIVERED' : 'IN PROGRESS'}
+                </span>
+              )}
+            </div>
+
+            {cardTracking ? (
+              <CardTracking tracking={cardTracking} />
+            ) : (
+              <div style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px',
+                padding: '40px 20px', textAlign: 'center',
+                background: '#F4F6F9', border: '1px dashed #DCE3EC',
+              }}>
+                <svg width="44" height="44" viewBox="0 0 44 44" fill="none" aria-hidden="true">
+                  <rect x="2" y="12" width="28" height="22" rx="2" stroke="#C7D5EE" strokeWidth="2" />
+                  <path d="M30 16l8 4v8l-8 4" stroke="#C7D5EE" strokeWidth="2" strokeLinejoin="round" />
+                  <circle cx="9" cy="36" r="3" stroke="#C7D5EE" strokeWidth="1.8" />
+                  <circle cx="25" cy="36" r="3" stroke="#C7D5EE" strokeWidth="1.8" />
+                </svg>
+                <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '15px', color: '#6B7280', margin: 0 }}>
+                  No active delivery
+                </p>
+                <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#9CA3AF', margin: 0, maxWidth: '340px', lineHeight: 1.6 }}>
+                  Once your card order is placed, your personalised tracking will appear here. Our team will update each step as your card moves through the process.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {kycPending ? (            <div style={{ background: '#FFFBEB', border: '1px solid #F59E0B', padding: '32px', display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
               <div style={{ width: '8px', flexShrink: 0, background: '#F59E0B', alignSelf: 'stretch' }} />
               <div>
                 <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#92400E', margin: '0 0 6px' }}>Verification in progress</p>

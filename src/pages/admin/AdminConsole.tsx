@@ -1,13 +1,14 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { getUsers, getActivity, getThreads, getThreadMessages, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
-import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, createAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, getAdminActivity, type AdminLoginEvent } from '../../lib/api';
+import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, createAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, getAdminActivity, getAdminCardTracking, updateAdminCardTracking, deleteAdminCardTracking, type AdminLoginEvent, type CardTrackingData } from '../../lib/api';
+import CardTracking, { TRACKING_STEPS } from '../../components/CardTracking';
 import { subscribeToChat, closeChatStream, type ChatEvent } from '../../lib/chatTransport';
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
 import BrandMark from '../../components/BrandMark';
 
-type Tab = 'chat' | 'users' | 'activity' | 'deposits';
+type Tab = 'chat' | 'users' | 'activity' | 'deposits' | 'tracking';
 
 /** A row shown in the admin Users tab. Local accounts carry a full record; a
  * user that only exists on the server side is merged in so the admin never
@@ -215,6 +216,15 @@ export default function AdminConsole() {
   const [threadUi, setThreadUi] = useState<Record<string, ThreadRowUi>>({});
   const touchStartX = useRef<Record<string, number | null>>({});
   const touchBaseX = useRef<Record<string, number>>({});
+
+  // Card delivery tracking state — keyed by user serverId.
+  const [trackingMap, setTrackingMap] = useState<Record<string, CardTrackingData | null>>({});
+  const [trackingBusy, setTrackingBusy] = useState<Record<string, boolean>>({});
+  const [trackingExpanded, setTrackingExpanded] = useState<Record<string, boolean>>({});
+  // Form state for the inline admin editor.
+  const [trackingForm, setTrackingForm] = useState<Record<string, { step: string; note: string; estimatedDelivery: string; orderedAt: string }>>({});
+  const [trackingError, setTrackingError] = useState<Record<string, string>>({});
+  const [trackingSaved, setTrackingSaved] = useState<Record<string, boolean>>({});
 
   // If the shared server is reachable but the stored admin token is stale, the
   // banner says RE-LOGIN (green fix: one click), never OFFLINE. Render free
@@ -627,6 +637,94 @@ export default function AdminConsole() {
 
   function logout() { adminLogout(); nav('/xk9-admin-console-7f3a'); }
 
+  // ---------------------------------------------------------------------------
+  // Card tracking helpers
+  // ---------------------------------------------------------------------------
+
+  async function loadTracking(serverId: string) {
+    if (!serverId || trackingBusy[serverId]) return;
+    setTrackingBusy(prev => ({ ...prev, [serverId]: true }));
+    try {
+      const r = await getAdminCardTracking(serverId);
+      if (r.ok) {
+        const t = r.data?.tracking ?? null;
+        setTrackingMap(prev => ({ ...prev, [serverId]: t }));
+        // Pre-fill the editor form from whatever is stored.
+        if (t) {
+          setTrackingForm(prev => ({
+            ...prev,
+            [serverId]: {
+              step: String(t.step),
+              note: t.note || '',
+              estimatedDelivery: t.estimatedDelivery || '',
+              orderedAt: t.orderedAt || '',
+            },
+          }));
+        } else {
+          setTrackingForm(prev => ({
+            ...prev,
+            [serverId]: { step: '0', note: '', estimatedDelivery: '', orderedAt: new Date().toISOString().slice(0, 10) },
+          }));
+        }
+      }
+    } catch { /* keep existing data */ }
+    setTrackingBusy(prev => ({ ...prev, [serverId]: false }));
+  }
+
+  function toggleTracking(serverId: string) {
+    const open = !trackingExpanded[serverId];
+    setTrackingExpanded(prev => ({ ...prev, [serverId]: open }));
+    if (open && trackingMap[serverId] === undefined) loadTracking(serverId);
+  }
+
+  async function saveTracking(serverId: string) {
+    const form = trackingForm[serverId];
+    if (!form) return;
+    const step = parseInt(form.step, 10);
+    if (isNaN(step) || step < 0 || step > 4) {
+      setTrackingError(prev => ({ ...prev, [serverId]: 'Step must be 0 – 4.' }));
+      return;
+    }
+    setTrackingError(prev => ({ ...prev, [serverId]: '' }));
+    setTrackingBusy(prev => ({ ...prev, [serverId]: true }));
+    try {
+      const r = await updateAdminCardTracking(serverId, {
+        step,
+        note: form.note.trim(),
+        estimatedDelivery: form.estimatedDelivery.trim(),
+        orderedAt: form.orderedAt.trim() || new Date().toISOString().slice(0, 10),
+      });
+      if (r.ok && r.data) {
+        setTrackingMap(prev => ({ ...prev, [serverId]: r.data!.tracking }));
+        setTrackingSaved(prev => ({ ...prev, [serverId]: true }));
+        setTimeout(() => setTrackingSaved(prev => ({ ...prev, [serverId]: false })), 2000);
+      } else {
+        setTrackingError(prev => ({ ...prev, [serverId]: 'Could not save. Try again.' }));
+      }
+    } catch {
+      setTrackingError(prev => ({ ...prev, [serverId]: 'Network error. Try again.' }));
+    }
+    setTrackingBusy(prev => ({ ...prev, [serverId]: false }));
+  }
+
+  async function clearTracking(serverId: string) {
+    if (!window.confirm('Clear this user\'s card tracking? This cannot be undone.')) return;
+    setTrackingBusy(prev => ({ ...prev, [serverId]: true }));
+    try {
+      await deleteAdminCardTracking(serverId);
+      setTrackingMap(prev => ({ ...prev, [serverId]: null }));
+      setTrackingForm(prev => ({
+        ...prev,
+        [serverId]: { step: '0', note: '', estimatedDelivery: '', orderedAt: new Date().toISOString().slice(0, 10) },
+      }));
+    } catch { /* keep existing */ }
+    setTrackingBusy(prev => ({ ...prev, [serverId]: false }));
+  }
+
+  function patchForm(serverId: string, patch: Partial<{ step: string; note: string; estimatedDelivery: string; orderedAt: string }>) {
+    setTrackingForm(prev => ({ ...prev, [serverId]: { ...(prev[serverId] || { step: '0', note: '', estimatedDelivery: '', orderedAt: '' }), ...patch } }));
+  }
+
   useEffect(() => { reload().catch(() => null); }, []);
   // One poller, not two: a duplicate interval doubled the request rate and raced
   // itself. While signed out reload() skips the admin reads, so a rejected token
@@ -679,6 +777,7 @@ export default function AdminConsole() {
     { key: 'users', label: 'Users' },
     { key: 'activity', label: 'Activity' },
     { key: 'deposits', label: 'Deposit Addresses' },
+    { key: 'tracking', label: 'Card Tracking' },
   ];
 
   const pendingUsers = users.filter(u => u.status === 'pending');
@@ -1330,6 +1429,232 @@ export default function AdminConsole() {
                   {copied === 'USDT' ? 'COPIED' : 'COPY'}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Card Tracking — admin management panel */}
+        {tab === 'tracking' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+            {/* Header */}
+            <div style={{ background: '#FFFFFF', border: '1px solid #DCE3EC', borderRadius: '12px 12px 0 0', padding: '20px 24px', borderBottom: '1px solid #DCE3EC' }}>
+              <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '16px', color: '#0A2044', margin: '0 0 4px' }}>Card Delivery Tracking</h2>
+              <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280', margin: 0 }}>
+                Set each customer's delivery step. Changes reflect immediately on their dashboard.
+              </p>
+            </div>
+
+            {/* Step reference legend */}
+            <div style={{ background: '#F8FAFD', border: '1px solid #DCE3EC', borderTop: 'none', padding: '14px 24px', display: 'flex', flexWrap: 'wrap', gap: '8px 20px' }}>
+              {TRACKING_STEPS.map((s, i) => (
+                <span key={i} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#4779C4' }}>
+                  <strong style={{ color: '#0A2044' }}>{i}</strong> — {s.label}
+                </span>
+              ))}
+            </div>
+
+            {/* User rows */}
+            <div style={{ background: '#FFFFFF', border: '1px solid #DCE3EC', borderTop: 'none', borderRadius: '0 0 12px 12px', overflow: 'hidden' }}>
+              {users.filter(u => u.serverId).length === 0 ? (
+                <div style={{ padding: '60px', textAlign: 'center', fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#374151' }}>
+                  No server-linked users yet. Once customers sign up through the shared server they will appear here.
+                </div>
+              ) : users.filter(u => u.serverId).map((u, idx, arr) => {
+                const sid = u.serverId!;
+                const tracking = trackingMap[sid];
+                const busy = !!trackingBusy[sid];
+                const open = !!trackingExpanded[sid];
+                const form = trackingForm[sid] || { step: '0', note: '', estimatedDelivery: '', orderedAt: new Date().toISOString().slice(0, 10) };
+                const saved = !!trackingSaved[sid];
+                const err = trackingError[sid] || '';
+                const isLast = idx === arr.filter(u => u.serverId).length - 1;
+
+                return (
+                  <div key={sid} style={{ borderBottom: isLast ? 'none' : '1px solid #DCE3EC' }}>
+                    {/* Collapsed row */}
+                    <div style={{ padding: '14px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                        <div style={{
+                          width: '10px', height: '10px', borderRadius: '50%', flexShrink: 0,
+                          background: tracking == null ? '#CBD5E0' : tracking.step === 4 ? '#1E7A4C' : '#4779C4',
+                          boxShadow: tracking != null && tracking.step < 4 ? '0 0 6px rgba(71,121,196,0.6)' : 'none',
+                        }} />
+                        <div style={{ minWidth: 0 }}>
+                          <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', fontWeight: 600, color: '#0A2044', margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name}</p>
+                          <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', margin: 0 }}>{u.email}</p>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+                        {tracking != null ? (
+                          <span style={{
+                            fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700,
+                            color: tracking.step === 4 ? '#1E7A4C' : '#123C7C',
+                            background: tracking.step === 4 ? '#F0FDF4' : '#EEF2FA',
+                            border: `1px solid ${tracking.step === 4 ? '#BBF7D0' : '#C7D5EE'}`,
+                            padding: '3px 10px',
+                          }}>
+                            {tracking.step === 4 ? '✓ DELIVERED' : `STEP ${tracking.step} — ${TRACKING_STEPS[tracking.step].label.toUpperCase()}`}
+                          </span>
+                        ) : (
+                          <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#9CA3AF', background: '#F4F6F9', border: '1px solid #DCE3EC', padding: '3px 10px' }}>
+                            NOT STARTED
+                          </span>
+                        )}
+
+                        <button
+                          onClick={() => toggleTracking(sid)}
+                          style={{
+                            fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700,
+                            color: '#fff', background: open ? '#6B7280' : '#123C7C',
+                            border: 'none', padding: '7px 14px', cursor: 'pointer', whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {busy && !open ? 'LOADING…' : open ? '▲ COLLAPSE' : '▼ MANAGE'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Expanded editor */}
+                    {open && (
+                      <div style={{ background: '#F8FAFD', borderTop: '1px solid #DCE3EC', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
+                        {/* Step selector */}
+                        <div>
+                          <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', margin: '0 0 10px' }}>Delivery Step</p>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                            {TRACKING_STEPS.map((s, i) => {
+                              const active = String(i) === form.step;
+                              return (
+                                <button
+                                  key={i}
+                                  onClick={() => patchForm(sid, { step: String(i) })}
+                                  style={{
+                                    fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: active ? 700 : 400,
+                                    color: active ? '#fff' : '#374151',
+                                    background: active ? (i === 4 ? '#1E7A4C' : '#123C7C') : '#FFFFFF',
+                                    border: `1.5px solid ${active ? (i === 4 ? '#1E7A4C' : '#123C7C') : '#DCE3EC'}`,
+                                    padding: '8px 14px', cursor: 'pointer', transition: 'all 0.12s',
+                                    display: 'flex', alignItems: 'center', gap: '6px',
+                                  }}
+                                >
+                                  <span style={{
+                                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                    width: '18px', height: '18px', borderRadius: '50%',
+                                    background: active ? 'rgba(255,255,255,0.25)' : '#F4F6F9',
+                                    fontSize: '10px', fontWeight: 700,
+                                    color: active ? '#fff' : '#6B7280',
+                                  }}>{i}</span>
+                                  {s.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Note */}
+                        <div>
+                          <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', display: 'block', marginBottom: '6px' }}>
+                            Status Note <span style={{ color: '#9CA3AF', fontWeight: 400 }}>(optional, shown to customer)</span>
+                          </label>
+                          <textarea
+                            value={form.note}
+                            onChange={e => patchForm(sid, { note: e.target.value })}
+                            rows={2}
+                            maxLength={200}
+                            placeholder="e.g. Your card has been dispatched via FedEx. Expected in 2–3 days."
+                            style={{
+                              width: '100%', background: '#FFFFFF', border: '1px solid #DCE3EC',
+                              padding: '10px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px',
+                              color: '#0A2044', outline: 'none', resize: 'vertical', boxSizing: 'border-box',
+                            }}
+                          />
+                        </div>
+
+                        {/* Dates row */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px' }}>
+                          <div style={{ flex: '1 1 180px' }}>
+                            <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', display: 'block', marginBottom: '6px' }}>Order Date</label>
+                            <input
+                              type="date"
+                              value={form.orderedAt}
+                              onChange={e => patchForm(sid, { orderedAt: e.target.value })}
+                              style={{ width: '100%', background: '#FFFFFF', border: '1px solid #DCE3EC', padding: '8px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none', boxSizing: 'border-box' }}
+                            />
+                          </div>
+                          <div style={{ flex: '1 1 180px' }}>
+                            <label style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4779C4', display: 'block', marginBottom: '6px' }}>Estimated Delivery</label>
+                            <input
+                              type="date"
+                              value={form.estimatedDelivery}
+                              onChange={e => patchForm(sid, { estimatedDelivery: e.target.value })}
+                              style={{ width: '100%', background: '#FFFFFF', border: '1px solid #DCE3EC', padding: '8px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none', boxSizing: 'border-box' }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Live preview */}
+                        {(() => {
+                          const previewStep = parseInt(form.step, 10);
+                          if (isNaN(previewStep)) return null;
+                          const previewTracking = {
+                            step: previewStep,
+                            note: form.note,
+                            estimatedDelivery: form.estimatedDelivery,
+                            orderedAt: form.orderedAt,
+                            updatedAt: tracking?.updatedAt || new Date().toISOString(),
+                          };
+                          return (
+                            <div style={{ background: '#FFFFFF', border: '1px solid #DCE3EC', padding: '20px' }}>
+                              <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#9CA3AF', margin: '0 0 16px' }}>Preview — what the customer sees</p>
+                              <CardTracking tracking={previewTracking} />
+                            </div>
+                          );
+                        })()}
+
+                        {err && (
+                          <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#DC2626', margin: 0 }}>{err}</p>
+                        )}
+                        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+                          <button
+                            onClick={() => saveTracking(sid)}
+                            disabled={busy}
+                            style={{
+                              fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 700,
+                              color: '#fff', background: saved ? '#1E7A4C' : busy ? '#6B7280' : '#123C7C',
+                              border: 'none', padding: '10px 24px', cursor: busy ? 'default' : 'pointer',
+                              transition: 'background 0.2s',
+                            }}
+                          >
+                            {busy ? 'SAVING…' : saved ? '✓ SAVED' : 'SAVE & PUBLISH'}
+                          </button>
+
+                          {tracking != null && (
+                            <button
+                              onClick={() => clearTracking(sid)}
+                              disabled={busy}
+                              style={{
+                                fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700,
+                                color: '#DC2626', background: '#fff',
+                                border: '1px solid #DC2626', padding: '10px 16px', cursor: busy ? 'default' : 'pointer',
+                              }}
+                            >
+                              CLEAR TRACKING
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => setTrackingExpanded(prev => ({ ...prev, [sid]: false }))}
+                            style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', background: 'none', border: '1px solid #DCE3EC', padding: '10px 14px', cursor: 'pointer' }}
+                          >
+                            COLLAPSE
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

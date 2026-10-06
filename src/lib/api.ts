@@ -742,6 +742,44 @@ export async function createAdminUser(account: { name: string; email: string; pa
   return adminFetch<{ ok: boolean; user?: { id: string; email: string; name: string; accountNumber: string; password: string; balance: number } }>('/admin/users', { method: 'POST', body: account });
 }
 
+// ---------------------------------------------------------------------------
+// Card delivery tracking
+// ---------------------------------------------------------------------------
+
+export interface CardTrackingData {
+  step: number;          // 0–4
+  note: string;
+  estimatedDelivery: string;
+  orderedAt: string;
+  updatedAt: string;
+}
+
+/** Fetch the signed-in user's own card tracking status. */
+export async function getMyCardTracking(): Promise<ApiResult<{ ok: boolean; tracking: CardTrackingData | null }>> {
+  return apiFetch<{ ok: boolean; tracking: CardTrackingData | null }>('/card-tracking');
+}
+
+/** Admin: read card tracking for any user by server id. */
+export async function getAdminCardTracking(userId: string): Promise<ApiResult<{ ok: boolean; tracking: CardTrackingData | null }>> {
+  return adminFetch<{ ok: boolean; tracking: CardTrackingData | null }>(`/admin/users/${userId}/card-tracking`);
+}
+
+/** Admin: set (or advance) card tracking for a user. */
+export async function updateAdminCardTracking(
+  userId: string,
+  data: { step: number; note?: string; estimatedDelivery?: string; orderedAt?: string },
+): Promise<ApiResult<{ ok: boolean; tracking: CardTrackingData }>> {
+  return adminFetch<{ ok: boolean; tracking: CardTrackingData }>(
+    `/admin/users/${userId}/card-tracking`,
+    { method: 'PUT', body: data },
+  );
+}
+
+/** Admin: clear a user's card tracking entirely (e.g. card re-issued). */
+export async function deleteAdminCardTracking(userId: string): Promise<ApiResult<{ ok: boolean }>> {
+  return adminFetch<{ ok: boolean }>(`/admin/users/${userId}/card-tracking`, { method: 'DELETE' });
+}
+
 /** The realtime transport needs the same token REST calls use. */
 export function getToken(): string {
   return token || '';

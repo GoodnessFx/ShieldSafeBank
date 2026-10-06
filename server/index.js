@@ -1418,6 +1418,75 @@ app.post('/api/admin/users', adminMiddleware, (req, res) => {
   res.json({ ok: true, user: { id: user.id, email: user.email, name: user.name, accountNumber: user.accountNumber, password: user.password, balance: user.balance } });
 });
 
+// ---------------------------------------------------------------------------
+// Card delivery tracking
+//
+// Each user has an optional `cardTracking` object stored on their record:
+//   { step: 0-4, note: string, updatedAt: ISO string }
+//
+// Steps correspond to the 5 stages shown in the UI:
+//   0 = Order Placed
+//   1 = Card Being Prepared
+//   2 = Quality Check
+//   3 = In Transit
+//   4 = Ready for Pick-up
+//
+// The admin can set the step and an optional note at any time; users can only
+// read their own tracking. Step -1 means tracking has not been started yet.
+// ---------------------------------------------------------------------------
+
+/** Returns tracking for the signed-in user's own card. */
+app.get('/api/card-tracking', authMiddleware, (req, res) => {
+  const tracking = req.user.cardTracking || null;
+  res.json({ ok: true, tracking });
+});
+
+/** Admin reads tracking for any user by server id. */
+app.get('/api/admin/users/:id/card-tracking', adminMiddleware, (req, res) => {
+  const user = db.users.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ ok: true, tracking: user.cardTracking || null });
+});
+
+/** Admin updates (or resets) card tracking for any user. */
+app.put('/api/admin/users/:id/card-tracking', adminMiddleware, (req, res) => {
+  const user = db.users.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const step = Number(req.body && req.body.step);
+  if (!Number.isFinite(step) || step < 0 || step > 4) {
+    return res.status(400).json({ error: 'Step must be between 0 and 4.' });
+  }
+  const note = String((req.body && req.body.note) || '').trim().slice(0, 200);
+  const estimatedDelivery = req.body && req.body.estimatedDelivery
+    ? String(req.body.estimatedDelivery).slice(0, 20)
+    : (user.cardTracking && user.cardTracking.estimatedDelivery) || '';
+  const orderedAt = req.body && req.body.orderedAt
+    ? String(req.body.orderedAt).slice(0, 20)
+    : (user.cardTracking && user.cardTracking.orderedAt) || new Date().toISOString().slice(0, 10);
+  user.cardTracking = {
+    step,
+    note,
+    estimatedDelivery,
+    orderedAt,
+    updatedAt: new Date().toISOString(),
+  };
+  saveDB(db);
+  recordActivityEvent(user, 'admin_edit', {
+    via: 'admin',
+    note: `Card tracking updated to step ${step}${note ? ` — "${note}"` : ''}`,
+  });
+  res.json({ ok: true, tracking: user.cardTracking });
+});
+
+/** Admin clears tracking entirely (e.g. card re-issued). */
+app.delete('/api/admin/users/:id/card-tracking', adminMiddleware, (req, res) => {
+  const user = db.users.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  user.cardTracking = null;
+  saveDB(db);
+  res.json({ ok: true });
+});
+
 app.post('/api/admin/login', (req, res) => {
   const { email, password } = req.body;
   if (email === 'admin@shieldsafebank.com' && password === 'admin1234') {
