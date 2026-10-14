@@ -6,6 +6,156 @@ import { fmtUSD, fmtDateTimeShort, toAmount, fmtText } from '../lib/format';
 import CardScanner, { readCardScan, writeCardScan, type CardScanResult } from '../components/CardScanner';
 import CardTracking from '../components/CardTracking';
 import Toast, { type ToastData } from '../components/Toast';
+import { CORERY_LEDGER, isCoreryEmail, type LedgerRow } from '../lib/coreryTxData';
+
+// ---------------------------------------------------------------------------
+// Category badge colours for the rich ledger view
+// ---------------------------------------------------------------------------
+const CATEGORY_COLOR: Record<string, string> = {
+  'Income': '#166534',
+  'Deposit': '#166534',
+  'Family transfer': '#1E40AF',
+  'Groceries': '#92400E',
+  'Groceries & household': '#92400E',
+  'Retail': '#374151',
+  'Clothing': '#6B21A8',
+  'Pharmacy': '#0E7490',
+  'Utilities': '#B45309',
+  'Phone & internet': '#B45309',
+  'Insurance': '#9A3412',
+  'Fuel': '#374151',
+  'Dining': '#DC2626',
+  'Home improvement': '#374151',
+};
+
+const CATEGORY_BG: Record<string, string> = {
+  'Income': '#F0FDF4',
+  'Deposit': '#F0FDF4',
+  'Family transfer': '#EFF6FF',
+  'Groceries': '#FEF3C7',
+  'Groceries & household': '#FEF3C7',
+  'Retail': '#F4F6F8',
+  'Clothing': '#F5F3FF',
+  'Pharmacy': '#ECFEFF',
+  'Utilities': '#FFFBEB',
+  'Phone & internet': '#FFFBEB',
+  'Insurance': '#FFF7ED',
+  'Fuel': '#F4F6F8',
+  'Dining': '#FEF2F2',
+  'Home improvement': '#F4F6F8',
+};
+
+// ---------------------------------------------------------------------------
+// PDF generator — pure browser, no external library needed
+// Builds an HTML document and triggers window.print() in a hidden iframe.
+// ---------------------------------------------------------------------------
+function downloadLedgerPdf(ledger: LedgerRow[] | null, user: import('../lib/api').MeData | null) {
+  const rows = ledger ?? [];
+  const name = user?.name || 'Account Holder';
+  const account = user?.accountNumber || '—';
+  const generated = new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' });
+
+  const rowsHtml = rows.map((r, i) => `
+    <tr class="${i % 2 === 0 ? 'even' : 'odd'}">
+      <td>${r.date}</td>
+      <td>${r.description}</td>
+      <td>${r.counterparty}</td>
+      <td>${r.category}</td>
+      <td class="right credit">${r.credit > 0 ? '$' + r.credit.toLocaleString('en-US', { minimumFractionDigits: 2 }) : ''}</td>
+      <td class="right debit">${r.debit > 0 ? '$' + r.debit.toLocaleString('en-US', { minimumFractionDigits: 2 }) : ''}</td>
+      <td class="right">${'$' + r.balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+      <td class="ref">${r.reference}</td>
+      <td>${r.status}</td>
+    </tr>`).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Transaction History – ${name}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Courier New', monospace; font-size: 8.5pt; color: #111; background: #fff; }
+  .header { padding: 18px 24px 12px; border-bottom: 2px solid #0A2044; display: flex; justify-content: space-between; align-items: flex-start; }
+  .bank { font-family: Arial, sans-serif; font-size: 15pt; font-weight: 700; color: #0A2044; }
+  .meta { font-size: 7.5pt; color: #555; text-align: right; line-height: 1.6; }
+  .subheader { padding: 8px 24px; background: #F4F6F8; border-bottom: 1px solid #DCE3EA; font-size: 7.5pt; color: #374151; display: flex; gap: 32px; }
+  .subheader span { font-weight: 600; color: #0A2044; }
+  table { width: 100%; border-collapse: collapse; margin: 0; }
+  thead tr { background: #0A2044; color: #fff; }
+  thead th { padding: 5px 7px; text-align: left; font-size: 7pt; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; font-weight: 600; }
+  thead th.right { text-align: right; }
+  tbody tr.even { background: #F9FAFB; }
+  tbody tr.odd  { background: #fff; }
+  tbody td { padding: 3.5px 7px; border-bottom: 1px solid #ECEFF3; vertical-align: middle; font-size: 7.5pt; }
+  td.right { text-align: right; }
+  td.credit { color: #166534; font-weight: 600; }
+  td.debit  { color: #B91C1C; }
+  td.ref    { font-size: 6.5pt; color: #888; }
+  .footer { padding: 10px 24px; border-top: 1px solid #DCE3EA; font-size: 7pt; color: #888; display: flex; justify-content: space-between; margin-top: 6px; }
+  @page { size: A3 landscape; margin: 12mm 10mm; }
+  @media print { .no-print { display: none; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <div class="bank">SHIELD SAFE BANK</div>
+    <div style="font-size:8pt;color:#555;margin-top:2px;">Official Account Statement</div>
+  </div>
+  <div class="meta">
+    Generated: ${generated}<br>
+    For: ${name}<br>
+    Account: ${account}
+  </div>
+</div>
+<div class="subheader">
+  Period: <span>January 2010 – October 2026</span>
+  &nbsp;|&nbsp;
+  Transactions: <span>${rows.length.toLocaleString()}</span>
+  &nbsp;|&nbsp;
+  Ending Balance: <span>$775,000.00</span>
+  &nbsp;|&nbsp;
+  Status: <span>All Completed</span>
+</div>
+<table>
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Description</th>
+      <th>Counterparty</th>
+      <th>Category</th>
+      <th class="right">Credit</th>
+      <th class="right">Debit</th>
+      <th class="right">Balance</th>
+      <th>Reference</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>${rowsHtml}</tbody>
+</table>
+<div class="footer">
+  <span>Shield Safe Bank · Official Statement · All transactions are fictional demo data for testing purposes.</span>
+  <span>Page <span class="pageNum"></span></span>
+</div>
+</body>
+</html>`;
+
+  // Write into a hidden iframe and trigger print-to-PDF
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;border:none;';
+  document.body.appendChild(iframe);
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!doc) { document.body.removeChild(iframe); return; }
+  doc.open();
+  doc.write(html);
+  doc.close();
+  // Give the iframe a moment to fully render before printing
+  setTimeout(() => {
+    try { iframe.contentWindow?.print(); } catch { /* ignore */ }
+    setTimeout(() => { document.body.removeChild(iframe); }, 2000);
+  }, 600);
+}
 
 const BTC_ADDR = DEPOSIT_ADDRESSES.BTC;
 const USDT_ADDR = DEPOSIT_ADDRESSES['USDT-ERC20'];
@@ -68,6 +218,7 @@ export default function Dashboard() {
   const [scanOpen, setScanOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastData[]>([]);
   const [cardTracking, setCardTracking] = useState<CardTrackingData | null>(null);
+  const [ledger, setLedger] = useState<LedgerRow[] | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState('');
@@ -156,6 +307,10 @@ export default function Dashboard() {
         setUser(me.data);
         setBalanceTarget(toAmount(me.data.balance));
         setCardScan(readCardScan(me.data.email));
+        // Inject the full ledger only for Corery Masibay's account.
+        if (isCoreryEmail(me.data.email)) {
+          setLedger(CORERY_LEDGER);
+        }
       }
       const t = await getTransactions();
       if (!cancelled && t.ok && t.data) setTxs(t.data.map(mapTx));
@@ -542,52 +697,120 @@ export default function Dashboard() {
 
           {/* Transaction history */}
           <div id="history" style={{ background: '#fff', border: '1px solid #DCE3EA' }}>
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #DCE3EA', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#0A2044', margin: 0 }}>Transaction history</h2>
-              <button style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#4779C4', background: 'none', border: '1px solid #DCE3EA', padding: '6px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 4h9M4 7h5M6 10h1" stroke="#4779C4" strokeWidth="1.2" strokeLinecap="square" /></svg>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #DCE3EA', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h2 style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '18px', color: '#0A2044', margin: '0 0 2px' }}>Transaction history</h2>
+                {ledger && (
+                  <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', margin: 0 }}>
+                    {ledger.length.toLocaleString()} transactions · Jan 2010 – Oct 2026 · Ending balance $775,000.00
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => downloadLedgerPdf(ledger, user)}
+                style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 600, color: '#fff', background: '#123C7C', border: 'none', padding: '8px 18px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+                  <path d="M6.5 1v8M3.5 6.5l3 3 3-3M1.5 11h10" stroke="#fff" strokeWidth="1.3" strokeLinecap="square" />
+                </svg>
                 Download PDF
               </button>
             </div>
-            <div style={{ overflowX: 'auto' }}>
-              {txs.length === 0 ? (
-                <div style={{ padding: '48px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                  <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '16px', color: '#0A2044', margin: 0 }}>No activity yet</p>
-                  <p style={{ fontSize: '13px', color: '#6B7280', margin: 0 }}>Send your first deposit to the address above and it will appear here.</p>
-                </div>
-              ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px' }}>
-                <thead>
-                  <tr style={{ background: '#F4F6F8' }}>
-                    {['Date', 'Type', 'Asset', 'Amount', 'Rate', 'USD', 'Status'].map(h => (
-                      <th key={h} style={{ padding: '10px 16px', textAlign: h === 'USD' || h === 'Amount' ? 'right' : 'left', fontWeight: 600, fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#6B7280', whiteSpace: 'nowrap', borderBottom: '1px solid #DCE3EA' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {txs.map((tx, i) => (
-                    <tr key={tx.id} style={{ borderBottom: i < txs.length - 1 ? '1px solid #DCE3EA' : 'none' }}>
-                      <td style={{ padding: '12px 16px', color: '#374151' }}>{tx.date}</td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 500, color: tx.type === 'Deposit' ? '#1E7A4C' : '#123C7C' }}>
-                          {tx.type === 'Deposit' ? '↓' : '↑'} {tx.type}
-                        </span>
-                      </td>
-                      <td style={{ padding: '12px 16px', color: '#374151' }}>{tx.asset}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right', color: '#374151' }}>{tx.amount || 'n/a'}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right', color: '#6B7280' }}>{tx.rate || 'n/a'}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, color: '#0A2044' }}>{tx.usd}</td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 600, color: tx.status === 'Pending' ? '#9A6B00' : tx.status === 'On Hold' ? '#9A6B00' : '#1E7A4C', letterSpacing: '0.04em' }}>
-                          ● {tx.status}
-                        </span>
-                      </td>
+
+            {ledger ? (
+              /* ── Rich ledger view (Corery Masibay) ── */
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: '#F4F6F8', position: 'sticky', top: 0 }}>
+                      {['Date', 'Description', 'Counterparty', 'Category', 'Credit', 'Debit', 'Balance', 'Reference', 'Status'].map(h => (
+                        <th key={h} style={{
+                          padding: '10px 14px',
+                          textAlign: h === 'Credit' || h === 'Debit' || h === 'Balance' ? 'right' : 'left',
+                          fontWeight: 600, fontSize: '10px', letterSpacing: '0.07em',
+                          textTransform: 'uppercase', color: '#6B7280', whiteSpace: 'nowrap',
+                          borderBottom: '1px solid #DCE3EA',
+                        }}>{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              )}
-            </div>
+                  </thead>
+                  <tbody>
+                    {ledger.map((row, i) => (
+                      <tr key={row.reference + i} style={{ borderBottom: i < ledger.length - 1 ? '1px solid #F0F2F5' : 'none', transition: 'background 0.08s' }}
+                        onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#F8FAFD'}
+                        onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = ''}
+                      >
+                        <td style={{ padding: '10px 14px', color: '#374151', whiteSpace: 'nowrap' }}>{row.date}</td>
+                        <td style={{ padding: '10px 14px', color: '#0A2044', fontWeight: 500, maxWidth: '220px' }}>{row.description}</td>
+                        <td style={{ padding: '10px 14px', color: '#374151', whiteSpace: 'nowrap' }}>{row.counterparty}</td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span style={{
+                            fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em',
+                            color: CATEGORY_COLOR[row.category] || '#374151',
+                            background: CATEGORY_BG[row.category] || '#F4F6F8',
+                            padding: '2px 8px', whiteSpace: 'nowrap',
+                          }}>{row.category}</span>
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', color: row.credit > 0 ? '#1E7A4C' : '#9CA3AF', fontWeight: row.credit > 0 ? 600 : 400 }}>
+                          {row.credit > 0 ? `+$${row.credit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', color: row.debit > 0 ? '#DC2626' : '#9CA3AF', fontWeight: row.debit > 0 ? 500 : 400 }}>
+                          {row.debit > 0 ? `-$${row.debit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600, color: '#0A2044', whiteSpace: 'nowrap' }}>
+                          ${row.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td style={{ padding: '10px 14px', color: '#6B7280', fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', whiteSpace: 'nowrap' }}>{row.reference}</td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span style={{ fontSize: '10px', fontWeight: 600, color: '#1E7A4C', letterSpacing: '0.04em' }}>● {row.status}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              /* ── Standard crypto transaction view (all other users) ── */
+              <div style={{ overflowX: 'auto' }}>
+                {txs.length === 0 ? (
+                  <div style={{ padding: '48px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                    <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '16px', color: '#0A2044', margin: 0 }}>No activity yet</p>
+                    <p style={{ fontSize: '13px', color: '#6B7280', margin: 0 }}>Send your first deposit to the address above and it will appear here.</p>
+                  </div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ background: '#F4F6F8' }}>
+                        {['Date', 'Type', 'Asset', 'Amount', 'Rate', 'USD', 'Status'].map(h => (
+                          <th key={h} style={{ padding: '10px 16px', textAlign: h === 'USD' || h === 'Amount' ? 'right' : 'left', fontWeight: 600, fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#6B7280', whiteSpace: 'nowrap', borderBottom: '1px solid #DCE3EA' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {txs.map((tx, i) => (
+                        <tr key={tx.id} style={{ borderBottom: i < txs.length - 1 ? '1px solid #DCE3EA' : 'none' }}>
+                          <td style={{ padding: '12px 16px', color: '#374151' }}>{tx.date}</td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 500, color: tx.type === 'Deposit' ? '#1E7A4C' : '#123C7C' }}>
+                              {tx.type === 'Deposit' ? '↓' : '↑'} {tx.type}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 16px', color: '#374151' }}>{tx.asset}</td>
+                          <td style={{ padding: '12px 16px', textAlign: 'right', color: '#374151' }}>{tx.amount || 'n/a'}</td>
+                          <td style={{ padding: '12px 16px', textAlign: 'right', color: '#6B7280' }}>{tx.rate || 'n/a'}</td>
+                          <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, color: '#0A2044' }}>{tx.usd}</td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 600, color: tx.status === 'Pending' ? '#9A6B00' : tx.status === 'On Hold' ? '#9A6B00' : '#1E7A4C', letterSpacing: '0.04em' }}>
+                              ● {tx.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
