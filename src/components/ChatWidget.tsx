@@ -56,6 +56,8 @@ export default function ChatWidget() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const agentTypingTimer = useRef<number | null>(null);
   const typingSentAtRef = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [pendingAttachment, setPendingAttachment] = useState<ChatAttachment | null>(null);
   // Customers may send as many messages as they like, one after another, so
   // several requests can be in flight at once. Each send takes a ticket and only
   // the newest response is allowed to replace the list — an older one would be
@@ -251,6 +253,23 @@ export default function ChatWidget() {
         storeLocally(who, text);
         if (isNewest()) applyMessages(getThreadMessages(who.id));
       });
+  }
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = typeof reader.result === 'string' ? reader.result : '';
+      const attachment: ChatAttachment = {
+        name: file.name,
+        type: file.type || 'application/octet-stream',
+        size: file.size,
+        url,
+      };
+      setPendingAttachment(attachment);
+    };
+    reader.readAsDataURL(file);
   }
 
   /** Throttled "typing…" heartbeat so the agent sees you're typing in realtime

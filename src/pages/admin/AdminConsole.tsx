@@ -7,6 +7,7 @@ import { subscribeToChat, closeChatStream, type ChatEvent } from '../../lib/chat
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
 import BrandMark from '../../components/BrandMark';
+import { readCardScan, writeCardScan, type CardScanResult } from '../../components/CardScanner';
 
 type Tab = 'chat' | 'users' | 'activity' | 'deposits' | 'tracking';
 
@@ -231,6 +232,10 @@ export default function AdminConsole() {
   const [editPhone, setEditPhone] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [editAccountNumber, setEditAccountNumber] = useState('');
+  // New state for editing card info
+  const [editingCardUser, setEditingCardUser] = useState<string | null>(null);
+  const [editCardLast4, setEditCardLast4] = useState('');
+  const [editCardHolder, setEditCardHolder] = useState('');
   // Add-customer form: lets an admin open a brand-new account from the panel.
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState({ name: '', email: '', password: '', type: 'personal', phone: '', balance: '' });
@@ -1252,7 +1257,7 @@ export default function AdminConsole() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px' }}>
                 <thead>
                   <tr style={{ background: '#F4F6F9' }}>
-                    {['Name', 'Email', 'Account Number', 'Type', 'Balance', 'Status', 'Last Login', 'Joined', 'Logins'].map(h => (
+                    {['Name', 'Email', 'Account Number', 'Type', 'Balance', 'Status', 'Card', 'Last Login', 'Joined', 'Logins'].map(h => (
                       <th key={h} style={{ padding: '10px 16px', textAlign: h === 'Balance' ? 'right' : 'left', color: '#123C7C', fontWeight: 600, fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid #DCE3EC', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -1386,6 +1391,40 @@ export default function AdminConsole() {
                           >
                             {verifying === u.email ? 'VERIFYING…' : 'VERIFY'}
                           </button>
+                        )}
+                      </td>
+                      <td style={{ padding: '11px 16px' }}>
+                        {editingCardUser === u.email ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '180px' }}>
+                            <input
+                              value={editCardLast4}
+                              onChange={e => setEditCardLast4(e.target.value)}
+                              placeholder="Last 4 digits"
+                              maxLength={4}
+                              style={{ background: '#FFFFFF', border: '1px solid #DCE3EC', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+                            />
+                            <input
+                              value={editCardHolder}
+                              onChange={e => setEditCardHolder(e.target.value)}
+                              placeholder="Cardholder name"
+                              style={{ background: '#FFFFFF', border: '1px solid #DCE3EC', padding: '5px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+                            />
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              <button
+                                onClick={() => { const sc = readCardScan(u.email) || { front: true, back: true, last4: '', holderName: '', scannedAt: '' }; sc.last4 = editCardLast4; sc.holderName = editCardHolder; sc.scannedAt = new Date().toISOString(); writeCardScan(u.email, sc); setEditingCardUser(null); }}
+                                style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#fff', background: '#1E7A4C', border: 'none', padding: '5px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                              >SAVE</button>
+                              <button
+                                onClick={() => setEditingCardUser(null)}
+                                style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#0A2044', background: '#fff', border: '1px solid #DCE3EC', padding: '5px 8px', cursor: 'pointer' }}
+                              >✕</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => { setEditingCardUser(u.email); const sc = readCardScan(u.email) || { last4: '', holderName: '' }; setEditCardLast4(sc.last4 || ''); setEditCardHolder(sc.holderName || ''); }}
+                            style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: '#123C7C', border: 'none', padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                          >EDIT CARD</button>
                         )}
                       </td>
                       <td style={{ padding: '11px 16px', color: '#6B7280' }}>
