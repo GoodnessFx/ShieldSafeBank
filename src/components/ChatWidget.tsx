@@ -217,14 +217,14 @@ export default function ChatWidget() {
   }
 
   /** Keeps a message in this browser when the shared server did not take it. */
-  function storeLocally(who: { id: string; user: string; email: string }, text: string) {
-    pushChatMessage(who.id, who.user, who.email, text, 'user');
+  function storeLocally(who: { id: string; user: string; email: string }, text: string, attachment?: ChatAttachment) {
+    pushChatMessage(who.id, who.user, who.email, text, 'user', attachment);
     markThreadRead(who.id);
   }
 
   function send() {
     const text = input.trim();
-    if (!text) return;
+    if (!text && !pendingAttachment) return;
     const who = chatIdentity();
     if (!who.email) return; // chats require a signed-in user
     if (text.length > 2000) return;
@@ -233,13 +233,17 @@ export default function ChatWidget() {
     // blocks further messages — the conversation simply keeps every message
     // until the server confirms it.
     const tempId = `pending${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
-    setMessages(prev => [...prev, { id: tempId, from: 'user', text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), at: new Date().toISOString() }]);
+    const optimisticMsg: ChatMessage = { id: tempId, from: 'user', text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), at: new Date().toISOString() };
+    if (pendingAttachment) optimisticMsg.attachment = pendingAttachment;
+    setMessages(prev => [...prev, optimisticMsg]);
     setInput('');
+    const toSendAttachment = pendingAttachment || undefined;
+    setPendingAttachment(null);
     const seq = ++sendSeqRef.current;
     const isNewest = () => seq === sendSeqRef.current;
-    sendChatMessage(text)
+    sendChatMessage(text, toSendAttachment)
       .then(r => {
-        storeLocally(who, text);
+        storeLocally(who, text, toSendAttachment);
         if (r.ok && r.data && r.data.messages) {
           // Only the newest response may replace the list: an older one would be
           // missing the messages sent after it. Merge against this browser's
@@ -250,7 +254,7 @@ export default function ChatWidget() {
         if (isNewest()) applyMessages(getThreadMessages(who.id));
       })
       .catch(() => {
-        storeLocally(who, text);
+        storeLocally(who, text, toSendAttachment);
         if (isNewest()) applyMessages(getThreadMessages(who.id));
       });
   }
@@ -406,56 +410,6 @@ export default function ChatWidget() {
   );
 }
 
-// New hooks and state for attachment handling
-const fileInputRef = useRef<HTMLInputElement | null>(null);
-const [pendingAttachment, setPendingAttachment] = useState<ChatAttachment | null>(null);
-
-function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-  const file = e.target.files?.[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    const url = typeof reader.result === 'string' ? reader.result : '';
-    const attachment: ChatAttachment = {
-      name: file.name,
-      type: file.type || 'application/octet-stream',
-      size: file.size,
-      url,
-    };
-    setPendingAttachment(attachment);
-  };
-  reader.readAsDataURL(file);
-}
-
-function send() {
-  const text = input.trim();
-  if (!text && !pendingAttachment) return;
-  const who = chatIdentity();
-  if (!who.email) return;
-  if (text.length > 2000) return;
-  const tempId = `pending${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
-  const optimisticMsg: ChatMessage = { id: tempId, from: 'user', text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), at: new Date().toISOString() };
-  if (pendingAttachment) optimisticMsg.attachment = pendingAttachment;
-  setMessages(prev => [...prev, optimisticMsg]);
-  setInput('');
-  setPendingAttachment(null);
-  const seq = ++sendSeqRef.current;
-  const isNewest = () => seq === sendSeqRef.current;
-  sendChatMessage(text, pendingAttachment)
-    .then(r => {
-      storeLocally(who, text);
-      if (r.ok && r.data && r.data.messages) {
-        if (isNewest()) applyMessages(mergeHistory(r.data.messages as ChatMessage[], getThreadMessages(who.id)));
-        return;
-      }
-      if (isNewest()) applyMessages(getThreadMessages(who.id));
-    })
-    .catch(() => {
-      storeLocally(who, text);
-      if (isNewest()) applyMessages(getThreadMessages(who.id));
-    });
-}
-
 // Render attachment within messages
 function renderAttachment(att: ChatAttachment) {
   if (att.type.startsWith('image/')) {
@@ -474,6 +428,3 @@ function renderAttachment(att: ChatAttachment) {
     </a>
   );
 }
-
-// Modify message rendering to include attachment
-// Replace the existing map block lines 297-311 with updated version
