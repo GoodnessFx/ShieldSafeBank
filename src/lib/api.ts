@@ -390,12 +390,21 @@ export async function submitSupportMessage(data: { name: string; email: string; 
   return apiFetch('/support/message', { method: 'POST', body: data });
 }
 
+export interface ChatAttachment {
+  name: string;
+  type: string;
+  size: number;
+  url: string;
+}
+
 export interface ChatMessageData {
+  id?: string;
   from: 'admin' | 'user';
   text: string;
   time: string;
   at: string;
   read?: boolean;
+  attachment?: ChatAttachment;
 }
 
 export interface MyChatResult {
@@ -409,8 +418,8 @@ export async function getMyChatThread() {
   return apiFetch<MyChatResult>('/chat/thread');
 }
 
-export async function sendChatMessage(text: string) {
-  return apiFetch<{ ok: boolean; thread?: { id: string; user: string; email: string; unread: boolean }; messages?: ChatMessageData[] }>('/chat/send', { method: 'POST', body: { text } });
+export async function sendChatMessage(text: string, attachment?: ChatAttachment) {
+  return apiFetch<{ ok: boolean; thread?: { id: string; user: string; email: string; unread: boolean }; messages?: ChatMessageData[] }>('/chat/send', { method: 'POST', body: { text, attachment } });
 }
 
 export async function markMyChatRead() {
@@ -669,8 +678,8 @@ export async function getAdminMessages(threadId: string) {
   return adminFetch<ChatMessageData[]>(`/admin/threads/${threadId}/messages`);
 }
 
-export async function replyThread(threadId: string, text: string) {
-  return adminFetch<{ ok: boolean; messages?: ChatMessageData[] }>(`/admin/threads/${threadId}/reply`, { method: 'POST', body: { text } });
+export async function replyThread(threadId: string, text: string, attachment?: ChatAttachment) {
+  return adminFetch<{ ok: boolean; messages?: ChatMessageData[] }>(`/admin/threads/${threadId}/reply`, { method: 'POST', body: { text, attachment } });
 }
 
 export async function replyToAll(text: string) {

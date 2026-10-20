@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
-import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
+import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem, type ChatAttachment } from '../../lib/localStore';
 import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, createAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, getAdminActivity, getAdminCardTracking, updateAdminCardTracking, deleteAdminCardTracking, type AdminLoginEvent, type CardTrackingData } from '../../lib/api';
 import CardTracking, { TRACKING_STEPS } from '../../components/CardTracking';
 import { subscribeToChat, closeChatStream, type ChatEvent } from '../../lib/chatTransport';
@@ -153,6 +153,53 @@ function ReadTicks({ read, onDark }: { read?: boolean; onDark?: boolean }) {
       <path d="M1 6.2 4.4 9.6 12 2" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" fill="none" />
       {read && <path d="M7 9.8 7.9 10.7 16.8 2" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" fill="none" />}
     </svg>
+  );
+}
+
+function formatFileSize(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
+
+function AttachmentBubble({ attachment, onDark }: { attachment: ChatAttachment; onDark?: boolean }) {
+  const isImage = attachment.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg)$/i.test(attachment.name);
+  const isPdf = attachment.type === 'application/pdf' || /\.pdf$/i.test(attachment.name);
+  const isWord = attachment.type.includes('word') || /\.(docx?|rtf)$/i.test(attachment.name);
+
+  if (isImage) {
+    return (
+      <div style={{ marginTop: '6px' }}>
+        <img
+          src={attachment.url}
+          alt={attachment.name}
+          onClick={() => window.open(attachment.url, '_blank')}
+          style={{ maxWidth: '100%', maxHeight: '200px', borderRadius: '6px', objectFit: 'contain', cursor: 'pointer', background: 'rgba(0,0,0,0.05)', display: 'block' }}
+        />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '10px', color: onDark ? '#BDE0FF' : '#6B7280' }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px' }}>{attachment.name}</span>
+          <a href={attachment.url} download={attachment.name} style={{ color: onDark ? '#fff' : '#123C7C', textDecoration: 'underline', marginLeft: '6px', fontWeight: 600 }}>Download</a>
+        </div>
+      </div>
+    );
+  }
+
+  const badgeColor = isPdf ? '#DC2626' : isWord ? '#2563EB' : '#4B5563';
+  const badgeLabel = isPdf ? 'PDF' : isWord ? 'DOC' : 'FILE';
+
+  return (
+    <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', background: onDark ? 'rgba(255,255,255,0.12)' : 'rgba(10,32,68,0.06)', borderRadius: '6px', border: `1px solid ${onDark ? 'rgba(255,255,255,0.2)' : '#DCE3EA'}` }}>
+      <span style={{ fontSize: '10px', fontWeight: 700, background: badgeColor, color: '#fff', padding: '3px 6px', borderRadius: '4px', letterSpacing: '0.04em' }}>{badgeLabel}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ margin: 0, fontSize: '11px', fontWeight: 600, color: onDark ? '#fff' : '#0A2044', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{attachment.name}</p>
+        <p style={{ margin: 0, fontSize: '10px', color: onDark ? '#D6E4F5' : '#6B7280' }}>{formatFileSize(attachment.size)}</p>
+      </div>
+      <a href={attachment.url} download={attachment.name} target="_blank" rel="noreferrer" style={{ fontSize: '11px', fontWeight: 600, color: onDark ? '#fff' : '#123C7C', textDecoration: 'underline', flexShrink: 0 }}>
+        Download
+      </a>
+    </div>
   );
 }
 

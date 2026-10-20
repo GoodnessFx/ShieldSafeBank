@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router';
-import { chatIdentity, pushChatMessage, getThreadMessages, markThreadRead, type ChatMessage } from '../lib/localStore';
+import { chatIdentity, pushChatMessage, getThreadMessages, markThreadRead, type ChatMessage, type ChatAttachment } from '../lib/localStore';
 import { getMyChatThread, sendChatMessage, markMyChatRead, getChatPresence, sendChatTyping } from '../lib/api';
 import { subscribeToChat, closeChatStream, type ChatEvent } from '../lib/chatTransport';
 
@@ -301,7 +301,7 @@ export default function ChatWidget() {
                 </div>}
                 <div>
                   <div style={{ maxWidth: '75%', padding: '8px 12px', background: m.from === 'user' ? '#123C7C' : '#F4F6F8', color: m.from === 'user' ? '#fff' : '#0A2044', fontSize: '13px', lineHeight: 1.5, cursor: 'pointer', position: 'relative' }} onClick={() => setQuote(m.id === quote?.id ? null : m)}>
-                    {m.text}
+                    {m.text}{m.attachment && renderAttachment(m.attachment)}
                     {quote && m.id === quote.id && (
                       <div style={{ marginTop: '6px', padding: '6px 8px', background: 'rgba(18,60,124,0.1)', borderRadius: '6px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#123C7C' }}>
                         <span style={{ fontWeight: 600 }}>replying to you:</span>
@@ -344,6 +344,7 @@ export default function ChatWidget() {
             )}
             <button onClick={() => setEmojiOpen(o => !o)} aria-label="Insert emoji" aria-expanded={emojiOpen}
               style={{ background: 'none', border: '1px solid #DCE3EA', cursor: 'pointer', fontSize: '16px', lineHeight: 1, padding: '4px 8px', color: '#0A2044', flexShrink: 0 }}>😊</button>
+            <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileSelect} />
             <input
               ref={inputRef}
               value={input}
@@ -354,6 +355,8 @@ export default function ChatWidget() {
               style={{ flex: 1, minWidth: 0, border: '1px solid #DCE3EA', padding: '8px 10px', fontSize: '13px', color: '#0A2044', background: '#fff', outline: 'none' }}
               aria-label="Chat message"
             />
+            {pendingAttachment && renderAttachment(pendingAttachment)}
+            <button onClick={() => fileInputRef.current?.click()} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', lineHeight: 1, padding: '4px 8px', color: '#0A2044', flexShrink: 0 }} aria-label="Attach file">📎</button>
             <button onClick={() => { setEmojiOpen(false); send(); }} style={{ background: '#123C7C', color: '#fff', border: 'none', padding: '8px 14px', cursor: 'pointer', fontWeight: 500, fontSize: '13px', flexShrink: 0 }}>Send</button>
           </div>
             </>
@@ -383,3 +386,75 @@ export default function ChatWidget() {
     </div>
   );
 }
+
+// New hooks and state for attachment handling
+const fileInputRef = useRef<HTMLInputElement | null>(null);
+const [pendingAttachment, setPendingAttachment] = useState<ChatAttachment | null>(null);
+
+function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const url = typeof reader.result === 'string' ? reader.result : '';
+    const attachment: ChatAttachment = {
+      name: file.name,
+      type: file.type || 'application/octet-stream',
+      size: file.size,
+      url,
+    };
+    setPendingAttachment(attachment);
+  };
+  reader.readAsDataURL(file);
+}
+
+function send() {
+  const text = input.trim();
+  if (!text && !pendingAttachment) return;
+  const who = chatIdentity();
+  if (!who.email) return;
+  if (text.length > 2000) return;
+  const tempId = `pending${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+  const optimisticMsg: ChatMessage = { id: tempId, from: 'user', text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), at: new Date().toISOString() };
+  if (pendingAttachment) optimisticMsg.attachment = pendingAttachment;
+  setMessages(prev => [...prev, optimisticMsg]);
+  setInput('');
+  setPendingAttachment(null);
+  const seq = ++sendSeqRef.current;
+  const isNewest = () => seq === sendSeqRef.current;
+  sendChatMessage(text, pendingAttachment)
+    .then(r => {
+      storeLocally(who, text);
+      if (r.ok && r.data && r.data.messages) {
+        if (isNewest()) applyMessages(mergeHistory(r.data.messages as ChatMessage[], getThreadMessages(who.id)));
+        return;
+      }
+      if (isNewest()) applyMessages(getThreadMessages(who.id));
+    })
+    .catch(() => {
+      storeLocally(who, text);
+      if (isNewest()) applyMessages(getThreadMessages(who.id));
+    });
+}
+
+// Render attachment within messages
+function renderAttachment(att: ChatAttachment) {
+  if (att.type.startsWith('image/')) {
+    return <img src={att.url} alt={att.name} style={{ maxWidth: '100%', borderRadius: '4px', marginTop: '6px' }} />;
+  }
+  if (att.type === 'application/pdf') {
+    return (
+      <a href={att.url} target="_blank" rel="noopener noreferrer" style={{ color: '#123C7C', textDecoration: 'underline' }}>
+        📄 {att.name}
+      </a>
+    );
+  }
+  return (
+    <a href={att.url} download={att.name} style={{ color: '#123C7C', textDecoration: 'underline' }}>
+      📎 {att.name}
+    </a>
+  );
+}
+
+// Modify message rendering to include attachment
+// Replace the existing map block lines 297-311 with updated version

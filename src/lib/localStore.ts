@@ -48,6 +48,13 @@ export interface LocalTx {
   status: string;
 }
 
+export interface ChatAttachment {
+  name: string;
+  type: string;
+  size: number;
+  url: string;
+}
+
 export interface ChatMessage {
   id?: string;
   from: 'user' | 'admin';
@@ -56,6 +63,7 @@ export interface ChatMessage {
   at: string;
   /** True once the receiving side has seen this message (blue-tick receipt). */
   read?: boolean;
+  attachment?: ChatAttachment;
 }
 
 export interface ChatThread {
@@ -362,7 +370,7 @@ export function ensureThread(id: string, user: string, email: string) {
   }
 }
 
-export function pushChatMessage(id: string, user: string, email: string, text: string, from: 'user' | 'admin') {
+export function pushChatMessage(id: string, user: string, email: string, text: string, from: 'user' | 'admin', attachment?: ChatAttachment) {
   ensureThread(id, user, email);
   const threads = read<ChatThread[]>(THREADS_KEY, []);
   const messages = read<Record<string, ChatMessage[]>>(MESSAGES_KEY, {});
@@ -371,7 +379,7 @@ export function pushChatMessage(id: string, user: string, email: string, text: s
 
   threads.forEach(t => {
     if (t.id === id) {
-      t.preview = text;
+      t.preview = text || (attachment ? `📎 ${attachment.name}` : '');
       t.time = time;
       t.at = at;
       if (from === 'user') t.unread = true;
@@ -381,7 +389,9 @@ export function pushChatMessage(id: string, user: string, email: string, text: s
   write(THREADS_KEY, threads);
 
   const list = messages[id] || [];
-  list.push({ id: `local${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, from, text, time, at });
+  const msg: ChatMessage = { id: `local${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, from, text, time, at };
+  if (attachment) msg.attachment = attachment;
+  list.push(msg);
   write(MESSAGES_KEY, { ...messages, [id]: list });
 }
 

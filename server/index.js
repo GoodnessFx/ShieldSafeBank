@@ -502,9 +502,25 @@ function recordActivityEvent(user, action, details = {}) {
 const chatSubscribers = new Set();
 let chatEventId = 0;
 
-function makeMessage(db, threadId, from, text) {
+function makeMessage(db, threadId, from, text, attachment = null) {
   const at = new Date().toISOString();
-  return { id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, from, text, time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }), at, read: false };
+  const msg = {
+    id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    from,
+    text: text || '',
+    time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }),
+    at,
+    read: false,
+  };
+  if (attachment && typeof attachment === 'object' && attachment.url) {
+    msg.attachment = {
+      name: String(attachment.name || 'attachment'),
+      type: String(attachment.type || 'application/octet-stream'),
+      size: Number(attachment.size || 0),
+      url: String(attachment.url),
+    };
+  }
+  return msg;
 }
 
 /** Fans an SSE frame out to every attached subscriber. Customers only ever get
@@ -597,7 +613,8 @@ function chatRateLimited(userId) {
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ limit: '25mb', extended: true }));
 
 // Public health check for hosting platforms (Render, Railway, uptime monitors).
 // Deliberately requires no auth so deploys are never marked unhealthy.
@@ -1071,19 +1088,20 @@ app.get('/api/chat/stream', (req, res) => {
 
 app.post('/api/chat/send', authMiddleware, (req, res) => {
   const text = (req.body && typeof req.body.text === 'string' && req.body.text.trim()) || '';
-  if (!text) return res.status(400).json({ error: 'Message cannot be empty.' });
+  const attachment = req.body && req.body.attachment ? req.body.attachment : null;
+  if (!text && !attachment) return res.status(400).json({ error: 'Message cannot be empty.' });
   if (text.length > CHAT_MAX_LEN) return res.status(400).json({ error: `Message is too long (max ${CHAT_MAX_LEN} characters).` });
   if (chatRateLimited(req.user.id)) return res.status(429).json({ error: 'You are sending messages too quickly. Please wait a moment.' });
   const thread = ensureUserThread(req.user);
   if (!db.messages[thread.id]) db.messages[thread.id] = [];
-  const msg = makeMessage(db, thread.id, 'user', text);
+  const msg = makeMessage(db, thread.id, 'user', text, attachment);
   db.messages[thread.id].push(msg);
-  thread.preview = text;
+  thread.preview = text || (attachment ? `📎 ${attachment.name || 'Attachment'}` : '');
   thread.time = msg.time;
   thread.at = msg.at;
   thread.unread = true; // a new customer message for the admin to see
   saveDB(db);
-  recordActivityEvent(req.user, 'chat_message', { via: 'email', note: text.slice(0, 80) });
+  recordActivityEvent(req.user, 'chat_message', { via: 'email', note: (text || (attachment ? attachment.name : '')).slice(0, 80) });
   publishChatEvent(thread.id, db.messages[thread.id], { id: thread.id, user: thread.user, email: thread.email, unread: true });
   res.json({ ok: true, thread: { id: thread.id, user: thread.user, email: thread.email, unread: true }, messages: db.messages[thread.id] });
 });
@@ -1253,16 +1271,20 @@ app.get('/api/admin/threads/:id/messages', adminMiddleware, (req, res) => {
 });
 
 app.post('/api/admin/threads/:id/reply', adminMiddleware, (req, res) => {
-  const { text } = req.body;
-  if (!text || !String(text).trim()) return res.status(400).json({ error: 'Message cannot be empty.' });
-  if (String(text).trim().length > CHAT_MAX_LEN) return res.status(400).json({ error: `Message is too long (max ${CHAT_MAX_LEN} characters).` });
+  const { text, attachment } = req.body;
+  const msgText = String(text || '').trim();
+  if (!msgText && !attachment) return res.status(400).json({ error: 'Message cannot be empty.' });
+  if (msgText.length > CHAT_MAX_LEN) return res.status(400).json({ error: `Message is too long (max ${CHAT_MAX_LEN} characters).` });
   const thread = resolveAdminThread(req.params.id);
   if (!thread) return res.status(404).json({ error: 'Thread not found.' });
   const id = thread.id;
   if (!db.messages[id]) db.messages[id] = [];
-  const msg = makeMessage(db, id, 'admin', String(text).trim());
+  const msg = makeMessage(db, id, 'admin', msgText, attachment);
   db.messages[id].push(msg);
-  thread.preview = msg.text; thread.time = msg.time; thread.at = msg.at; thread.unread = false;
+  thread.preview = msgText || (attachment ? `📎 ${attachment.name || 'Attachment'}` : '');
+  thread.time = msg.time;
+  thread.at = msg.at;
+  thread.unread = false;
   saveDB(db);
   publishChatEvent(id, db.messages[id], { id: thread.id, user: thread.user, email: thread.email, unread: false });
   res.json({ ok:true, messages: db.messages[id] });
