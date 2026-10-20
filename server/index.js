@@ -559,9 +559,13 @@ function openChatStream(req, res, identity) {
   req.on('close', () => { clearInterval(heartbeat); chatSubscribers.delete(sub); });
 }
 
-/** A customer's own thread, adopted once known so their stream filters to it. */
 function threadForUser(user) {
-  return (db.threads || []).find(t => t.userId === user.id);
+  if (!user) return null;
+  const byId = (db.threads || []).find(t => t.userId === user.id);
+  if (byId) return byId;
+  const e = String(user.email || '').toLowerCase();
+  if (e) return (db.threads || []).find(t => String(t.email || '').toLowerCase() === e) || null;
+  return null;
 }
 
 const CHAT_MAX_LEN = 2000;
@@ -1221,23 +1225,46 @@ app.get('/api/admin/chat/stream', (req, res) => {
   openChatStream(req, res, { isAdmin: true });
 });
 
+function resolveAdminThread(id) {
+  if (!id) return null;
+  let thread = (db.threads || []).find(t => t.id === id);
+  if (thread) return thread;
+  const raw = String(id).trim();
+  const normalized = raw.toLowerCase();
+  const withoutU = normalized.startsWith('u') ? normalized.slice(1) : normalized;
+  thread = (db.threads || []).find(t => 
+    (t.email && (t.email.toLowerCase() === normalized || t.email.toLowerCase() === withoutU)) ||
+    t.userId === raw ||
+    t.userId === withoutU
+  );
+  if (thread) return thread;
+  const emailCandidate = (normalized.startsWith('u') && normalized.includes('@')) ? normalized.slice(1) : normalized.includes('@') ? normalized : '';
+  if (emailCandidate) {
+    const user = (db.users || []).find(u => u.email.toLowerCase() === emailCandidate);
+    if (user) return ensureUserThread(user);
+  }
+  return null;
+}
+
 app.get('/api/admin/threads/:id/messages', adminMiddleware, (req, res) => {
-  res.json(db.messages[req.params.id] || []);
+  const thread = resolveAdminThread(req.params.id);
+  const id = thread ? thread.id : req.params.id;
+  res.json(db.messages[id] || []);
 });
 
 app.post('/api/admin/threads/:id/reply', adminMiddleware, (req, res) => {
   const { text } = req.body;
-  const id = req.params.id;
   if (!text || !String(text).trim()) return res.status(400).json({ error: 'Message cannot be empty.' });
   if (String(text).trim().length > CHAT_MAX_LEN) return res.status(400).json({ error: `Message is too long (max ${CHAT_MAX_LEN} characters).` });
-  if (!db.threads.some(t => t.id === id)) return res.status(404).json({ error: 'Thread not found.' });
+  const thread = resolveAdminThread(req.params.id);
+  if (!thread) return res.status(404).json({ error: 'Thread not found.' });
+  const id = thread.id;
   if (!db.messages[id]) db.messages[id] = [];
   const msg = makeMessage(db, id, 'admin', String(text).trim());
   db.messages[id].push(msg);
-  const thread = db.threads.find(t => t.id === id);
-  if (thread) { thread.preview = msg.text; thread.time = msg.time; thread.at = msg.at; thread.unread = false; }
+  thread.preview = msg.text; thread.time = msg.time; thread.at = msg.at; thread.unread = false;
   saveDB(db);
-  publishChatEvent(id, db.messages[id], thread ? { id: thread.id, user: thread.user, email: thread.email, unread: false } : null);
+  publishChatEvent(id, db.messages[id], { id: thread.id, user: thread.user, email: thread.email, unread: false });
   res.json({ ok:true, messages: db.messages[id] });
 });
 
@@ -1269,20 +1296,21 @@ app.post('/api/admin/threads/reply-all', adminMiddleware, (req, res) => {
 // flips the read flags on the customer's messages so the customer's outgoing
 // bubbles can show a blue tick once the reply has been seen.
 app.post('/api/admin/threads/:id/read', adminMiddleware, (req, res) => {
-  const thread = db.threads.find(t => t.id === req.params.id);
+  const thread = resolveAdminThread(req.params.id);
   if (thread) {
+    const id = thread.id;
     thread.unread = false;
-    const msgs = (db.messages[thread.id] || []).map(m => m.from === 'user' ? { ...m, read: true } : m);
-    db.messages[thread.id] = msgs;
+    const msgs = (db.messages[id] || []).map(m => m.from === 'user' ? { ...m, read: true } : m);
+    db.messages[id] = msgs;
     saveDB(db);
-    if (msgs.some(m => m.from === 'user' && m.read)) publishRead(thread.id, msgs);
+    if (msgs.some(m => m.from === 'user' && m.read)) publishRead(id, msgs);
   }
   res.json({ ok:true });
 });
 
 // Realtime "typing…" heartbeat from an admin on a specific conversation.
 app.post('/api/admin/threads/:id/typing', adminMiddleware, (req, res) => {
-  const thread = db.threads.find(t => t.id === req.params.id);
+  const thread = resolveAdminThread(req.params.id);
   if (thread) publishTyping(thread.id, 'admin');
   res.json({ ok:true });
 });
@@ -1290,9 +1318,9 @@ app.post('/api/admin/threads/:id/typing', adminMiddleware, (req, res) => {
 // Deletes a whole conversation and its messages from the same admin store the
 // console reads, so the thread disappears everywhere instead of only locally.
 app.delete('/api/admin/threads/:id', adminMiddleware, (req, res) => {
-  const id = String(req.params.id || '');
-  const thread = db.threads.find(t => t.id === id);
+  const thread = resolveAdminThread(req.params.id);
   if (!thread) return res.status(404).json({ error: 'Thread not found.' });
+  const id = thread.id;
   db.threads = db.threads.filter(t => t.id !== id);
   delete db.messages[id];
   saveDB(db);

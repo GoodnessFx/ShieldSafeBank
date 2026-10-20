@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
-import { getUsers, getActivity, getThreads, getThreadMessages, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
+import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem } from '../../lib/localStore';
 import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, createAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, getAdminActivity, getAdminCardTracking, updateAdminCardTracking, deleteAdminCardTracking, type AdminLoginEvent, type CardTrackingData } from '../../lib/api';
 import CardTracking, { TRACKING_STEPS } from '../../components/CardTracking';
 import { subscribeToChat, closeChatStream, type ChatEvent } from '../../lib/chatTransport';
@@ -217,6 +217,7 @@ export default function AdminConsole() {
   const touchStartX = useRef<Record<string, number | null>>({});
   const touchBaseX = useRef<Record<string, number>>({});
 
+
   // Card delivery tracking state — keyed by user serverId.
   const [trackingMap, setTrackingMap] = useState<Record<string, CardTrackingData | null>>({});
   const [trackingBusy, setTrackingBusy] = useState<Record<string, boolean>>({});
@@ -378,12 +379,20 @@ export default function AdminConsole() {
       if (!byId.has(l.id)) byId.set(l.id, { id: l.id, user: l.user, email: l.email, preview: l.preview, time: l.time, at: l.at, unread: !!l.unread });
     }
     // One person = one chat: collapse any rows that share an email (e.g. a local
-    // fallback copy plus the server copy), keeping the most recently active one.
+    // fallback copy plus the server copy), preferring the server thread ID.
     const deduped = new Map<string, AdminThread>();
     for (const t of Array.from(byId.values())) {
       const key = (t.email || '').toLowerCase() || t.id;
       const existing = deduped.get(key);
-      if (!existing || String(t.at || '') > String(existing.at || '')) deduped.set(key, t);
+      if (!existing) {
+        deduped.set(key, t);
+      } else {
+        const isServer = serverThreads.some(s => s.id === t.id);
+        const existingIsServer = serverThreads.some(s => s.id === existing.id);
+        const preferredId = existingIsServer ? existing.id : isServer ? t.id : (existing.id || t.id);
+        const newer = String(t.at || '') > String(existing.at || '') ? t : existing;
+        deduped.set(key, { ...newer, id: preferredId });
+      }
     }
     const merged = Array.from(deduped.values()).sort((a, b) => (a.at || '') < (b.at || '') ? 1 : (a.at || '') > (b.at || '') ? -1 : 0);
     setThreads(merged);
@@ -392,11 +401,30 @@ export default function AdminConsole() {
   }
 
   async function loadMessages(id: string): Promise<ChatMessage[]> {
+    const thread = threads.find(t => t.id === id) || getThreads().find(t => t.id === id);
+    const localMsgs = getThreadMessages(id);
+    const altId = thread && thread.email ? `u${thread.email.toLowerCase()}` : '';
+    const altLocalMsgs = altId && altId !== id ? getThreadMessages(altId) : [];
+    const allLocal = [...localMsgs, ...altLocalMsgs];
+
     try {
       const r = await getAdminMessages(id);
-      if (r.ok && r.data) return r.data;
+      if (r.ok && r.data) {
+        const serverTexts = new Set(r.data.map(m => m.text));
+        const missing = allLocal.filter(m => !serverTexts.has(m.text));
+        return [...r.data, ...missing];
+      }
     } catch { /* fall back below */ }
-    return getThreadMessages(id);
+
+    const seen = new Set<string>();
+    const res: ChatMessage[] = [];
+    for (const m of allLocal) {
+      if (!seen.has(m.text)) {
+        seen.add(m.text);
+        res.push(m);
+      }
+    }
+    return res;
   }
 
   async function selectThread(id: string) {
@@ -413,16 +441,34 @@ export default function AdminConsole() {
     sendingReplyRef.current = true;
     setEmojiOpen(false);
     const id = activeThread;
+    const thread = threads.find(t => t.id === id) || getThreads().find(t => t.id === id);
     const stamp = new Date().toISOString();
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setChatInput('');
     // WhatsApp habit: your reply appears immediately, then the server copy replaces it.
-    setMessages(prev => [...prev, { id: `admin${Date.now()}`, from: 'admin', text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), at: stamp }]);
+    setMessages(prev => [...prev, { id: `admin${Date.now()}`, from: 'admin', text, time, at: stamp }]);
+
+    // Always store locally so offline mode or local browser chat has the message:
+    pushChatMessage(id, thread ? thread.user : 'Customer', thread ? thread.email : '', text, 'admin');
+    if (thread && thread.email) {
+      const localId = `u${thread.email.toLowerCase()}`;
+      if (localId !== id) {
+        pushChatMessage(localId, thread.user, thread.email, text, 'admin');
+      }
+    }
+    markThreadRead(id);
+
     try {
-      await replyThread(id, text);
-      markThreadRead(id);
-      setMessages(await loadMessages(id));
+      const r = await replyThread(id, text);
+      if (r.ok && r.data?.messages) {
+        setMessages(r.data.messages);
+      } else {
+        setMessages(await loadMessages(id));
+      }
       await loadThreads();
-    } catch { /* keep the optimistic message visible */ }
+    } catch {
+      setMessages(await loadMessages(id));
+    }
     sendingReplyRef.current = false;
   }
 
@@ -998,7 +1044,8 @@ export default function AdminConsole() {
                       </button>
                     )}
                   </div>
-                <button onClick={() => selectThread(thread.id)}
+                <div role="button" tabIndex={0} onClick={() => selectThread(thread.id)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') selectThread(thread.id); }}
                   onTouchStart={e => onThreadTouchStart(thread.id, e)}
                   onTouchMove={e => onThreadTouchMove(thread.id, e)}
                   onTouchEnd={() => onThreadTouchEnd(thread.id)}
@@ -1036,7 +1083,7 @@ export default function AdminConsole() {
                       >DELETE</button>
                     )}
                   </div>
-                </button>
+                </div>
                 </div>
                 );
               })}
@@ -1402,7 +1449,7 @@ export default function AdminConsole() {
             <div style={{ border: '1px solid #DCE3EC', borderRadius: '12px', background: '#FFFFFF', padding: '24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div>
-                  <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', fontWeight: 700, color: '#fff', margin: '0 0 4px', letterSpacing: '0.04em' }}>BTC (Bitcoin)</p>
+                  <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', fontWeight: 700, color: '#0A2044', margin: '0 0 4px', letterSpacing: '0.04em' }}>BTC (Bitcoin)</p>
                   <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', margin: 0 }}>{BTC_NETWORK}</p>
                 </div>
                 <span style={{ fontSize: '12px', color: '#4779C4', fontWeight: 700, fontFamily: 'IBM Plex Mono, monospace' }}>BITCOIN</span>
@@ -1418,7 +1465,7 @@ export default function AdminConsole() {
             <div style={{ border: '1px solid #DCE3EC', borderRadius: '12px', background: '#FFFFFF', padding: '24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div>
-                  <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', fontWeight: 700, color: '#fff', margin: '0 0 4px', letterSpacing: '0.04em' }}>USDT (ERC-20, Ethereum)</p>
+                  <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', fontWeight: 700, color: '#0A2044', margin: '0 0 4px', letterSpacing: '0.04em' }}>USDT (ERC-20, Ethereum)</p>
                   <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', margin: 0 }}>{USDT_NETWORK}</p>
                 </div>
                 <span style={{ fontSize: '12px', color: '#4779C4', fontWeight: 700, fontFamily: 'IBM Plex Mono, monospace' }}>ETHEREUM</span>

@@ -171,7 +171,7 @@ export default function ChatWidget() {
     const localMsgs = getThreadMessages(who.id);
     if (localMsgs.length === 0) return false;
     const known = new Set(serverMsgs.map(messageKey));
-    const missing = localMsgs.filter(m => !known.has(messageKey(m)) && !syncedTextsRef.current.has(messageKey(m)));
+    const missing = localMsgs.filter(m => m.from === 'user' && !known.has(messageKey(m)) && !syncedTextsRef.current.has(messageKey(m)));
     for (const m of missing) {
       syncedTextsRef.current.add(messageKey(m));
       sendChatMessage(m.text).catch(() => { syncedTextsRef.current.delete(messageKey(m)); });
@@ -237,6 +237,7 @@ export default function ChatWidget() {
     const isNewest = () => seq === sendSeqRef.current;
     sendChatMessage(text)
       .then(r => {
+        storeLocally(who, text);
         if (r.ok && r.data && r.data.messages) {
           // Only the newest response may replace the list: an older one would be
           // missing the messages sent after it. Merge against this browser's
@@ -244,9 +245,6 @@ export default function ChatWidget() {
           if (isNewest()) applyMessages(mergeHistory(r.data.messages as ChatMessage[], getThreadMessages(who.id)));
           return;
         }
-        // Server rejected or unreachable: the message still exists in this
-        // browser, and the poll uploads it again once the backend is reachable.
-        storeLocally(who, text);
         if (isNewest()) applyMessages(getThreadMessages(who.id));
       })
       .catch(() => {
