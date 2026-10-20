@@ -37,18 +37,36 @@ function isDir(p) {
 const server = http.createServer(async (req, res) => {
   try {
     const urlPath = decodeURIComponent(String(req.url || '/').split('?')[0]);
+    if (urlPath === '/health' || urlPath === '/healthz' || urlPath === '/ping') {
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('OK');
+      return;
+    }
     const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
     let file = path.normalize(path.join(DIST, rel));
     if (file !== DIST && !file.startsWith(DIST + path.sep)) file = path.join(DIST, 'index.html');
     if (!existsSync(file) || isDir(file)) file = path.join(DIST, 'index.html');
-    const body = await readFile(file);
     const ext = path.extname(file).toLowerCase();
-    res.writeHead(200, { 'content-type': MIME[ext] || 'application/octet-stream' });
+    const isHtml = ext === '.html';
+    const headers = {
+      'content-type': MIME[ext] || 'application/octet-stream',
+      'cache-control': isHtml ? 'no-cache, no-store, must-revalidate' : 'public, max-age=31536000, immutable',
+    };
+    if (req.method === 'HEAD') {
+      res.writeHead(200, headers);
+      res.end();
+      return;
+    }
+    const body = await readFile(file);
+    res.writeHead(200, headers);
     res.end(body);
   } catch {
     try {
       const fallback = await readFile(path.join(DIST, 'index.html'));
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-cache, no-store, must-revalidate',
+      });
       res.end(fallback);
     } catch {
       res.writeHead(500, { 'content-type': 'text/plain' });
@@ -57,6 +75,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`Shield Safe Bank static server on http://localhost:${PORT} (serving dist/)`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Shield Safe Bank static server on http://0.0.0.0:${PORT} (serving dist/)`);
 });
