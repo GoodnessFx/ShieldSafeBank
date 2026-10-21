@@ -301,14 +301,13 @@ export default function Dashboard() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    async function loadData(firstTime = false) {
       const me = await getMe();
       if (!cancelled && me.ok && me.data) {
         setUser(me.data);
         setBalanceTarget(toAmount(me.data.balance));
-        setCardScan(readCardScan(me.data.email));
-        // Inject the full ledger only for Corery Masibay's account.
-        if (isCoreryEmail(me.data.email)) {
+        setCardScan(prev => prev || readCardScan(me.data!.email));
+        if (firstTime && isCoreryEmail(me.data.email)) {
           setLedger(CORERY_LEDGER);
         }
       }
@@ -316,8 +315,15 @@ export default function Dashboard() {
       if (!cancelled && t.ok && t.data) setTxs(t.data.map(mapTx));
       const tr = await getMyCardTracking();
       if (!cancelled && tr.ok && tr.data && tr.data.tracking) setCardTracking(tr.data.tracking);
-    })();
-    return () => { cancelled = true; };
+    }
+    loadData(true);
+    const interval = setInterval(() => {
+      loadData(false);
+    }, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   function handleDeposit(e: React.FormEvent) {
@@ -499,7 +505,7 @@ export default function Dashboard() {
             </div>
 
             <div className="card-scan-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 320px) 1fr', gap: '28px', alignItems: 'center' }}>
-              <CardVisual last4={cardScan ? cardScan.last4 : '••••'} holderName={cardScan ? cardScan.holderName || '' : ''} />
+              <CardVisual last4={cardScan ? cardScan.last4 : (user?.cardLast4 || '••••')} holderName={cardScan ? cardScan.holderName || '' : (user?.cardHolder || user?.name || '')} />
 
               <div>
                 {cardScan ? (
@@ -684,8 +690,13 @@ export default function Dashboard() {
                       From: {user && user.accountNumber ? user.accountNumber : 'Shield Safe Bank account'}
                     </p>
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#374151', margin: 0 }}>
-                      To: ••••• Bank ending 4821 (ACH)
+                      To: ••••• {user?.achBankName || 'Bank'} ending {user?.achLast4 || '4821'} ({user?.achType || 'ACH'})
                     </p>
+                    {user?.achRouting && (
+                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', margin: 0 }}>
+                        Routing (ABA): {user.achRouting} {user.achAccountName ? `· ${user.achAccountName}` : ''}
+                      </p>
+                    )}
                   </div>
                   <button type="submit" disabled={wLoading} style={{ background: '#123C7C', color: '#fff', border: 'none', padding: '12px', fontWeight: 600, fontSize: '14px', cursor: 'pointer', transition: 'background 0.15s', opacity: wLoading ? 0.6 : 1 }}>
                     {wLoading ? 'Submitting…' : 'Request withdrawal'}

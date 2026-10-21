@@ -133,8 +133,16 @@ export interface MeData {
   lastName?: string;
   phone?: string;
   dob?: string;
-  address?: string;
   businessName?: string;
+  achBankName?: string;
+  achLast4?: string;
+  achRouting?: string;
+  achType?: string;
+  achAccountName?: string;
+  cardLast4?: string;
+  cardHolder?: string;
+  cardExp?: string;
+  cardCvv?: string;
 }
 
 /** Full identity fields every sign-up collects; survives local/offline mode too. */
@@ -605,8 +613,39 @@ export async function adminLogin(email: string, password: string, totp = ''): Pr
   return r;
 }
 
+export interface AdminUserData {
+  id: string;
+  name: string;
+  email: string;
+  status: string;
+  balance: string;
+  joined: string;
+  lastLogin: string;
+  lastActiveAt?: string;
+  kyc: string;
+  accountNumber?: string;
+  password?: string;
+  firstName: string;
+  middleName: string;
+  lastName: string;
+  phone: string;
+  dob: string;
+  address: string;
+  businessName: string;
+  type: string;
+  achBankName?: string;
+  achLast4?: string;
+  achRouting?: string;
+  achType?: string;
+  achAccountName?: string;
+  cardLast4?: string;
+  cardHolder?: string;
+  cardExp?: string;
+  cardCvv?: string;
+}
+
 export async function getAdminUsers() {
-  return adminFetch<{ id: string; name: string; email: string; status: string; balance: string; joined: string; lastLogin: string; lastActiveAt?: string; kyc: string; accountNumber?: string; password?: string; firstName: string; middleName: string; lastName: string; phone: string; dob: string; address: string; businessName: string; type: string }[]>('/admin/users');
+  return adminFetch<AdminUserData[]>('/admin/users');
 }
 
 // Authenticated liveness probe for the deployed console. Unlike the public
@@ -738,8 +777,30 @@ export async function setAdminUserBalance(userId: string, balance: number) {
   return adminFetch<{ ok: boolean; balance: number }>(`/admin/users/${userId}/balance`, { method: 'POST', body: { balance } });
 }
 
-export async function patchAdminUser(userId: string, profile: { name?: string; email?: string; phone?: string; password?: string; accountNumber?: string; firstName?: string; middleName?: string; lastName?: string; dob?: string; address?: string; businessName?: string; status?: string }) {
-  return adminFetch<{ ok: boolean; user?: { id: string; name: string; email: string; phone: string; password?: string; accountNumber?: string } }>(`/admin/users/${userId}`, { method: 'PATCH', body: profile });
+export async function patchAdminUser(userId: string, profile: {
+  name?: string;
+  email?: string;
+  phone?: string;
+  password?: string;
+  accountNumber?: string;
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  dob?: string;
+  address?: string;
+  businessName?: string;
+  status?: string;
+  achBankName?: string;
+  achLast4?: string;
+  achRouting?: string;
+  achType?: string;
+  achAccountName?: string;
+  cardLast4?: string;
+  cardHolder?: string;
+  cardExp?: string;
+  cardCvv?: string;
+}) {
+  return adminFetch<{ ok: boolean; user?: Partial<AdminUserData> }>(`/admin/users/${userId}`, { method: 'PATCH', body: profile });
 }
 
 export async function verifyAdminUser(userId: string) {

@@ -231,6 +231,15 @@ function normalizeDB(db) {
     u.emailVerified = !!u.emailVerified;
     u.totpEnabled = !!u.totpEnabled;
     u.accountNumber = makeAccountNumber(u.accountNumber);
+    u.achBankName = u.achBankName || 'Bank';
+    u.achLast4 = u.achLast4 || '4821';
+    u.achRouting = u.achRouting || '021000021';
+    u.achType = u.achType || 'ACH';
+    u.achAccountName = u.achAccountName || u.name || '';
+    u.cardLast4 = u.cardLast4 || '';
+    u.cardHolder = u.cardHolder || u.name || '';
+    u.cardExp = u.cardExp || '';
+    u.cardCvv = u.cardCvv || '';
     u.firstName = u.firstName || '';
     u.middleName = u.middleName || '';
     u.lastName = u.lastName || '';
@@ -909,7 +918,12 @@ app.post('/api/auth/verify-email', authMiddleware, (req, res) => {
 
 app.get('/api/auth/me', authMiddleware, (req, res) => {
   const u = req.user;
-  res.json({ id:u.id, email:u.email, name:u.name, balance:num(u.balance), kycStatus:u.kycStatus, type:u.type, status:u.status, joined:u.joined, emailVerified:u.emailVerified, accountNumber:u.accountNumber, firstName:u.firstName || '', middleName:u.middleName || '', lastName:u.lastName || '', phone:u.phone || '', dob:u.dob || '', address:u.address || '', businessName:u.businessName || '' });
+  res.json({
+    id:u.id, email:u.email, name:u.name, balance:num(u.balance), kycStatus:u.kycStatus, type:u.type, status:u.status, joined:u.joined, emailVerified:u.emailVerified,
+    accountNumber:u.accountNumber, firstName:u.firstName || '', middleName:u.middleName || '', lastName:u.lastName || '', phone:u.phone || '', dob:u.dob || '', address:u.address || '', businessName:u.businessName || '',
+    achBankName: u.achBankName || 'Bank', achLast4: u.achLast4 || '4821', achRouting: u.achRouting || '021000021', achType: u.achType || 'ACH', achAccountName: u.achAccountName || u.name || '',
+    cardLast4: u.cardLast4 || '', cardHolder: u.cardHolder || u.name || '', cardExp: u.cardExp || '', cardCvv: u.cardCvv || '',
+  });
 });
 
 // Presence heartbeat: every signed-in customer pings this every 30 seconds so the
@@ -1150,6 +1164,15 @@ app.get('/api/admin/users', adminMiddleware, (_, res) => {
     firstName: u.firstName || '', middleName: u.middleName || '', lastName: u.lastName || '',
     phone: u.phone || '', dob: u.dob || '', address: u.address || '',
     businessName: u.businessName || '', type: u.type || 'personal',
+    achBankName: u.achBankName || 'Bank',
+    achLast4: u.achLast4 || '4821',
+    achRouting: u.achRouting || '021000021',
+    achType: u.achType || 'ACH',
+    achAccountName: u.achAccountName || u.name || '',
+    cardLast4: u.cardLast4 || '',
+    cardHolder: u.cardHolder || u.name || '',
+    cardExp: u.cardExp || '',
+    cardCvv: u.cardCvv || '',
   }));
   res.json(users);
 });
@@ -1409,6 +1432,15 @@ app.patch('/api/admin/users/:id', adminMiddleware, async (req, res) => {
   if (typeof body.accountNumber === 'string' && body.accountNumber.trim()) {
     user.accountNumber = body.accountNumber.trim();
   }
+  if (typeof body.achBankName === 'string') user.achBankName = body.achBankName.trim();
+  if (typeof body.achLast4 === 'string') user.achLast4 = body.achLast4.trim();
+  if (typeof body.achRouting === 'string') user.achRouting = body.achRouting.trim();
+  if (typeof body.achType === 'string') user.achType = body.achType.trim();
+  if (typeof body.achAccountName === 'string') user.achAccountName = body.achAccountName.trim();
+  if (typeof body.cardLast4 === 'string') user.cardLast4 = body.cardLast4.trim();
+  if (typeof body.cardHolder === 'string') user.cardHolder = body.cardHolder.trim();
+  if (typeof body.cardExp === 'string') user.cardExp = body.cardExp.trim();
+  if (typeof body.cardCvv === 'string') user.cardCvv = body.cardCvv.trim();
   if (typeof body.firstName === 'string') user.firstName = body.firstName.trim();
   if (typeof body.middleName === 'string') user.middleName = body.middleName.trim();
   if (typeof body.lastName === 'string') user.lastName = body.lastName.trim();
@@ -1436,7 +1468,14 @@ app.patch('/api/admin/users/:id', adminMiddleware, async (req, res) => {
   await saveDB(db);
   const edited = Object.keys(body).filter(k => typeof body[k] === 'string' && body[k].trim());
   recordActivityEvent(user, 'admin_edit', { via: 'admin', note: `Admin edited: ${edited.join(', ') || 'profile'}` });
-  res.json({ ok:true, user:{ id:user.id, name:user.name, email:user.email, phone:user.phone || '', password: user.password || '', accountNumber: user.accountNumber || '' } });
+  res.json({
+    ok:true,
+    user:{
+      id:user.id, name:user.name, email:user.email, phone:user.phone || '', password: user.password || '', accountNumber: user.accountNumber || '',
+      achBankName: user.achBankName || 'Bank', achLast4: user.achLast4 || '4821', achRouting: user.achRouting || '021000021', achType: user.achType || 'ACH', achAccountName: user.achAccountName || user.name || '',
+      cardLast4: user.cardLast4 || '', cardHolder: user.cardHolder || user.name || '', cardExp: user.cardExp || '', cardCvv: user.cardCvv || '',
+    }
+  });
 });
 
 // Admin creates a customer account directly from the panel. The account is

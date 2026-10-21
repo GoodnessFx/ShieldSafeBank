@@ -25,6 +25,17 @@ export interface StoreUser {
   dob?: string;
   address?: string;
   businessName?: string;
+  /** ACH destination bank details for withdrawals */
+  achBankName?: string;
+  achLast4?: string;
+  achRouting?: string;
+  achType?: string;
+  achAccountName?: string;
+  /** Debit card digits */
+  cardLast4?: string;
+  cardHolder?: string;
+  cardExp?: string;
+  cardCvv?: string;
 }
 
 export interface ActivityEvent {
@@ -262,7 +273,7 @@ export function ensureAccount(email: string, name = '', type = 'personal'): Stor
 }
 
 /** Persists full KYC identity details for an account (merge, never erase). */
-export function setUserProfile(email: string, profile: Partial<Pick<StoreUser, 'name' | 'firstName' | 'middleName' | 'lastName' | 'phone' | 'dob' | 'address' | 'businessName' | 'type'>>): StoreUser | null {
+export function setUserProfile(email: string, profile: Partial<StoreUser>): StoreUser | null {
   if (!email) return null;
   const users = read<Record<string, StoreUser>>(USERS_KEY, {});
   const oid = email.toLowerCase();
@@ -276,7 +287,8 @@ export function setUserProfile(email: string, profile: Partial<Pick<StoreUser, '
     balance: 0,
     accountNumber: generateAccountNumber(),
   };
-  for (const key of ['name', 'firstName', 'middleName', 'lastName', 'phone', 'dob', 'address', 'businessName', 'type'] as const) {
+  const keys = ['name', 'firstName', 'middleName', 'lastName', 'phone', 'dob', 'address', 'businessName', 'type', 'accountNumber', 'password', 'achBankName', 'achLast4', 'achRouting', 'achType', 'achAccountName', 'cardLast4', 'cardHolder', 'cardExp', 'cardCvv'] as const;
+  for (const key of keys) {
     const v = profile[key];
     if (typeof v === 'string') (user as unknown as Record<string, string>)[key] = v;
   }
