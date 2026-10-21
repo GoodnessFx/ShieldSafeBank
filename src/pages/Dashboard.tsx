@@ -223,6 +223,12 @@ export default function Dashboard() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState('');
   const [profileForm, setProfileForm] = useState({ firstName: '', middleName: '', lastName: '', phone: '', dob: '', address: '', businessName: '' });
+  const [achBankName, setAchBankName] = useState('');
+  const [achLast4, setAchLast4] = useState('');
+  const [achRouting, setAchRouting] = useState('');
+  const [achType, setAchType] = useState('ACH');
+  const [achAccountName, setAchAccountName] = useState('');
+  const [editingAch, setEditingAch] = useState(false);
   const balance = useCountUp(balanceTarget, 1800);
 
   function profileFromUser(u: MeData | null) {
@@ -307,8 +313,15 @@ export default function Dashboard() {
         setUser(me.data);
         setBalanceTarget(toAmount(me.data.balance));
         setCardScan(prev => prev || readCardScan(me.data!.email));
-        if (firstTime && isCoreryEmail(me.data.email)) {
-          setLedger(CORERY_LEDGER);
+        if (firstTime) {
+          if (me.data.achBankName) setAchBankName(me.data.achBankName);
+          if (me.data.achLast4) setAchLast4(me.data.achLast4);
+          if (me.data.achRouting) setAchRouting(me.data.achRouting);
+          if (me.data.achType) setAchType(me.data.achType);
+          if (me.data.achAccountName) setAchAccountName(me.data.achAccountName);
+          if (isCoreryEmail(me.data.email)) {
+            setLedger(CORERY_LEDGER);
+          }
         }
       }
       const t = await getTransactions();
@@ -362,9 +375,17 @@ export default function Dashboard() {
     if (amt < 10) { setWithdrawError('Minimum withdrawal is $10.00.'); return; }
     setWithdrawError('');
     setWLoading(true);
-    requestWithdrawal(amt).then(r => {
+    const destDetails = {
+      achBankName: achBankName || user?.achBankName || 'Bank',
+      achLast4: achLast4 || user?.achLast4 || '4821',
+      achRouting: achRouting || user?.achRouting || '021000021',
+      achType: achType || user?.achType || 'ACH',
+      achAccountName: achAccountName || user?.achAccountName || user?.name || '',
+    };
+    requestWithdrawal(amt, destDetails).then(r => {
       if (r.ok) {
         setBalanceTarget(r.data ? toAmount(r.data.balance) : toAmount(balanceTarget) - amt);
+        setUser(prev => prev ? { ...prev, ...destDetails } : prev);
         setWithdrawAmount('');
         setWLoading(false);
         setWithdrawSent(true);
@@ -664,11 +685,25 @@ export default function Dashboard() {
               <p style={{ fontSize: '13px', color: '#6B7280', margin: '0 0 20px' }}>To linked bank account (ACH). Free, one to three business days.</p>
 
               {withdrawSent ? (
-                <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', padding: '20px' }}>
-                  <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '15px', color: '#15803D', margin: '0 0 6px' }}>Withdrawal requested</p>
-                  <p style={{ fontSize: '13px', color: '#166534', margin: 0 }}>
-                    Your withdrawal is being processed.
+                <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', padding: '20px', borderRadius: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '18px' }}>✓</span>
+                    <p style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, fontSize: '15px', color: '#15803D', margin: 0 }}>Withdrawal requested</p>
+                  </div>
+                  <p style={{ fontSize: '13px', color: '#166534', margin: '0 0 12px', lineHeight: 1.5 }}>
+                    Your withdrawal request has been received and is being processed by our payments desk.
                   </p>
+                  <div style={{ background: '#FFFFFF', border: '1px solid #BBF7D0', padding: '12px 14px', borderRadius: '4px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#166534', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div><strong>From:</strong> {user && user.accountNumber ? user.accountNumber : 'Shield Safe Bank account'}</div>
+                    <div><strong>To:</strong> ••••• {achBankName || user?.achBankName || 'Bank'} ending {achLast4 || user?.achLast4 || '4821'} ({achType || user?.achType || 'ACH'})</div>
+                    <div><strong>Routing:</strong> {achRouting || user?.achRouting || '021000021'} {achAccountName || user?.achAccountName ? `· ${achAccountName || user?.achAccountName}` : ''}</div>
+                  </div>
+                  <button
+                    onClick={() => { setWithdrawSent(false); setWithdrawAmount(''); }}
+                    style={{ marginTop: '14px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#15803D', background: '#DCFCE7', border: '1px solid #BBF7D0', padding: '6px 14px', borderRadius: '4px', cursor: 'pointer' }}
+                  >
+                    Make another withdrawal
+                  </button>
                 </div>
               ) : (
                 <form onSubmit={handleWithdraw} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -685,19 +720,101 @@ export default function Dashboard() {
                     </p>
                   </div>
                   {withdrawError && <p style={{ fontSize: '13px', color: '#DC2626', margin: 0, fontWeight: 500 }}>{withdrawError}</p>}
-                  <div style={{ background: '#F4F6F8', border: '1px solid #DCE3EA', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  
+                  <div style={{ background: '#F4F6F8', border: '1px solid #DCE3EA', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                      <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 600, color: '#0A2044', margin: 0 }}>
+                        From: {user && user.accountNumber ? user.accountNumber : 'Shield Safe Bank account'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setEditingAch(!editingAch)}
+                        style={{
+                          fontFamily: 'IBM Plex Mono, monospace',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          color: '#123C7C',
+                          background: '#FFFFFF',
+                          border: '1px solid #C7D5EE',
+                          borderRadius: '4px',
+                          padding: '3px 8px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {editingAch ? '✕ Close' : '✏️ Edit destination bank'}
+                      </button>
+                    </div>
+
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#374151', margin: 0 }}>
-                      From: {user && user.accountNumber ? user.accountNumber : 'Shield Safe Bank account'}
+                      To: ••••• {achBankName || user?.achBankName || 'Bank'} ending {achLast4 || user?.achLast4 || '4821'} ({achType || user?.achType || 'ACH'})
                     </p>
-                    <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#374151', margin: 0 }}>
-                      To: ••••• {user?.achBankName || 'Bank'} ending {user?.achLast4 || '4821'} ({user?.achType || 'ACH'})
-                    </p>
-                    {user?.achRouting && (
+                    {(achRouting || user?.achRouting) && (
                       <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', margin: 0 }}>
-                        Routing (ABA): {user.achRouting} {user.achAccountName ? `· ${user.achAccountName}` : ''}
+                        Routing (ABA): {achRouting || user?.achRouting} {(achAccountName || user?.achAccountName) ? `· ${achAccountName || user?.achAccountName}` : ''}
                       </p>
                     )}
+
+                    {editingAch && (
+                      <div style={{ marginTop: '8px', paddingTop: '10px', borderTop: '1px dashed #C7D5EE', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <p style={{ margin: 0, fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#123C7C', fontWeight: 700 }}>
+                          SPECIFY LINKED BANK & ACCOUNT NUMBERS:
+                        </p>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
+                          <div>
+                            <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#6B7280', marginBottom: '2px' }}>DESTINATION BANK NAME</label>
+                            <input
+                              value={achBankName}
+                              onChange={e => setAchBankName(e.target.value)}
+                              placeholder="e.g. Chase, Wells Fargo"
+                              style={{ width: '100%', background: '#fff', border: '1px solid #DCE3EA', padding: '6px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#6B7280', marginBottom: '2px' }}>LAST 4 DIGITS (ENDING)</label>
+                            <input
+                              value={achLast4}
+                              onChange={e => setAchLast4(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
+                              maxLength={4}
+                              placeholder="e.g. 4821"
+                              style={{ width: '100%', background: '#fff', border: '1px solid #DCE3EA', padding: '6px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#6B7280', marginBottom: '2px' }}>ROUTING NUMBER (ABA 9-DIGIT)</label>
+                            <input
+                              value={achRouting}
+                              onChange={e => setAchRouting(e.target.value.replace(/[^0-9]/g, '').slice(0, 9))}
+                              maxLength={9}
+                              placeholder="e.g. 021000021"
+                              style={{ width: '100%', background: '#fff', border: '1px solid #DCE3EA', padding: '6px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#6B7280', marginBottom: '2px' }}>TRANSFER TYPE</label>
+                            <select
+                              value={achType}
+                              onChange={e => setAchType(e.target.value)}
+                              style={{ width: '100%', background: '#fff', border: '1px solid #DCE3EA', padding: '6px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+                            >
+                              <option value="ACH">ACH Transfer (Free, 1-3 days)</option>
+                              <option value="Wire">Wire Transfer (Same day)</option>
+                              <option value="Direct Deposit">Direct Deposit</option>
+                            </select>
+                          </div>
+                          <div style={{ gridColumn: '1 / -1' }}>
+                            <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#6B7280', marginBottom: '2px' }}>ACCOUNT HOLDER / BENEFICIARY NAME</label>
+                            <input
+                              value={achAccountName}
+                              onChange={e => setAchAccountName(e.target.value)}
+                              placeholder="e.g. Legal Name on Account"
+                              style={{ width: '100%', background: '#fff', border: '1px solid #DCE3EA', padding: '6px 8px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
+
                   <button type="submit" disabled={wLoading} style={{ background: '#123C7C', color: '#fff', border: 'none', padding: '12px', fontWeight: 600, fontSize: '14px', cursor: 'pointer', transition: 'background 0.15s', opacity: wLoading ? 0.6 : 1 }}>
                     {wLoading ? 'Submitting…' : 'Request withdrawal'}
                   </button>

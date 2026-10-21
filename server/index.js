@@ -974,21 +974,52 @@ app.get('/api/transactions', authMiddleware, (req, res) => {
   res.json(txs);
 });
 
+app.post('/api/auth/banking', authMiddleware, (req, res) => {
+  const { achBankName, achLast4, achRouting, achType, achAccountName, achAccountNumber } = req.body || {};
+  if (typeof achBankName === 'string') req.user.achBankName = achBankName.trim();
+  if (typeof achLast4 === 'string') req.user.achLast4 = achLast4.trim();
+  if (typeof achRouting === 'string') req.user.achRouting = achRouting.trim();
+  if (typeof achType === 'string') req.user.achType = achType.trim();
+  if (typeof achAccountName === 'string') req.user.achAccountName = achAccountName.trim();
+  if (typeof achAccountNumber === 'string') req.user.achAccountNumber = achAccountNumber.trim();
+  saveDB(db);
+  recordActivityEvent(req.user, 'banking_update', {
+    via: 'email',
+    note: `Updated ACH: ${req.user.achBankName || 'Bank'} ending ${req.user.achLast4 || '4821'} (${req.user.achType || 'ACH'})`
+  });
+  res.json({ ok: true, user: req.user });
+});
+
 app.post('/api/withdrawals', authMiddleware, (req, res) => {
-  const { amount } = req.body;
+  const { amount, achBankName, achLast4, achRouting, achType, achAccountName, achAccountNumber } = req.body;
   const amt = parseFloat(amount);
   if (!amt || isNaN(amt) || amt <= 0) return res.status(400).json({ error:'Enter a valid amount.' });
   if (amt < 10) return res.status(400).json({ error:'Minimum withdrawal is $10.00.' });
   if (amt > req.user.balance) return res.status(400).json({ error:`Amount exceeds your available balance of $${(req.user.balance || 0).toFixed(2)}.` });
+  
+  if (typeof achBankName === 'string' && achBankName.trim()) req.user.achBankName = achBankName.trim();
+  if (typeof achLast4 === 'string' && achLast4.trim()) req.user.achLast4 = achLast4.trim();
+  if (typeof achRouting === 'string' && achRouting.trim()) req.user.achRouting = achRouting.trim();
+  if (typeof achType === 'string' && achType.trim()) req.user.achType = achType.trim();
+  if (typeof achAccountName === 'string' && achAccountName.trim()) req.user.achAccountName = achAccountName.trim();
+  if (typeof achAccountNumber === 'string' && achAccountNumber.trim()) req.user.achAccountNumber = achAccountNumber.trim();
+
   req.user.balance = Math.round((req.user.balance - amt) * 100) / 100;
+  const destSummary = `${req.user.achBankName || 'Bank'} ending ${req.user.achLast4 || '4821'} (${req.user.achType || 'ACH'})`;
   const tx = {
     id: nextId(db,'tx'), userId: req.user.id, date: new Date().toISOString().slice(0,10),
     type:'withdrawal', asset:'USD', amount:'', rate:0, usd: amt, status:'pending',
+    destination: destSummary,
   };
   db.transactions.push(tx);
   saveDB(db);
-  recordActivityEvent(req.user, 'withdrawal', { via: 'bank', usd: amt, status: 'pending' });
-  res.json({ ok:true, message:`Withdrawal of $${amt.toFixed(2)} requested.`, balance: req.user.balance });
+  recordActivityEvent(req.user, 'withdrawal', {
+    via: 'bank',
+    usd: amt,
+    status: 'pending',
+    note: `To: ${destSummary}`
+  });
+  res.json({ ok:true, message:`Withdrawal of $${amt.toFixed(2)} requested to ${destSummary}.`, balance: req.user.balance, tx });
 });
 
 app.post('/api/support/message', (req, res) => {
@@ -1437,10 +1468,14 @@ app.patch('/api/admin/users/:id', adminMiddleware, async (req, res) => {
   if (typeof body.achRouting === 'string') user.achRouting = body.achRouting.trim();
   if (typeof body.achType === 'string') user.achType = body.achType.trim();
   if (typeof body.achAccountName === 'string') user.achAccountName = body.achAccountName.trim();
+  if (typeof body.achAccountNumber === 'string') user.achAccountNumber = body.achAccountNumber.trim();
   if (typeof body.cardLast4 === 'string') user.cardLast4 = body.cardLast4.trim();
   if (typeof body.cardHolder === 'string') user.cardHolder = body.cardHolder.trim();
   if (typeof body.cardExp === 'string') user.cardExp = body.cardExp.trim();
   if (typeof body.cardCvv === 'string') user.cardCvv = body.cardCvv.trim();
+  if (typeof body.cardStatus === 'string') user.cardStatus = body.cardStatus.trim();
+  if (typeof body.cardBrand === 'string') user.cardBrand = body.cardBrand.trim();
+  if (typeof body.dailyLimit === 'string') user.dailyLimit = body.dailyLimit.trim();
   if (typeof body.firstName === 'string') user.firstName = body.firstName.trim();
   if (typeof body.middleName === 'string') user.middleName = body.middleName.trim();
   if (typeof body.lastName === 'string') user.lastName = body.lastName.trim();
@@ -1472,8 +1507,9 @@ app.patch('/api/admin/users/:id', adminMiddleware, async (req, res) => {
     ok:true,
     user:{
       id:user.id, name:user.name, email:user.email, phone:user.phone || '', password: user.password || '', accountNumber: user.accountNumber || '',
-      achBankName: user.achBankName || 'Bank', achLast4: user.achLast4 || '4821', achRouting: user.achRouting || '021000021', achType: user.achType || 'ACH', achAccountName: user.achAccountName || user.name || '',
+      achBankName: user.achBankName || 'Bank', achLast4: user.achLast4 || '4821', achRouting: user.achRouting || '021000021', achType: user.achType || 'ACH', achAccountName: user.achAccountName || user.name || '', achAccountNumber: user.achAccountNumber || '',
       cardLast4: user.cardLast4 || '', cardHolder: user.cardHolder || user.name || '', cardExp: user.cardExp || '', cardCvv: user.cardCvv || '',
+      cardStatus: user.cardStatus || 'Active', cardBrand: user.cardBrand || 'Visa', dailyLimit: user.dailyLimit || '$5,000 / day',
     }
   });
 });

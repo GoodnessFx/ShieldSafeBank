@@ -31,11 +31,15 @@ export interface StoreUser {
   achRouting?: string;
   achType?: string;
   achAccountName?: string;
-  /** Debit card digits */
+  achAccountNumber?: string;
+  /** Debit card digits and settings */
   cardLast4?: string;
   cardHolder?: string;
   cardExp?: string;
   cardCvv?: string;
+  cardStatus?: string;
+  cardBrand?: string;
+  dailyLimit?: string;
 }
 
 export interface ActivityEvent {
@@ -558,4 +562,29 @@ export function addWithdrawal(email: string, usd: number) {
   };
   pushTx(oid, tx);
   return { ok: true, balance: user.balance, tx };
+}
+
+export function updateUserBanking(email: string, details: Partial<StoreUser>): StoreUser | null {
+  const users = read<Record<string, StoreUser>>(USERS_KEY, {});
+  const oid = email.toLowerCase();
+  const user = users[oid];
+  if (!user) return null;
+  Object.assign(user, details);
+  users[oid] = user;
+  write(USERS_KEY, users);
+
+  try {
+    const raw = localStorage.getItem('ssb_local_user');
+    if (raw) {
+      const session = JSON.parse(raw);
+      if (session && typeof session.email === 'string' && session.email.toLowerCase() === oid) {
+        Object.assign(session, details);
+        localStorage.setItem('ssb_local_user', JSON.stringify(session));
+      }
+    }
+  } catch {
+    // ignore local session sync errors
+  }
+
+  return user;
 }

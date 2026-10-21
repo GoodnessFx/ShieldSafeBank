@@ -139,10 +139,14 @@ export interface MeData {
   achRouting?: string;
   achType?: string;
   achAccountName?: string;
+  achAccountNumber?: string;
   cardLast4?: string;
   cardHolder?: string;
   cardExp?: string;
   cardCvv?: string;
+  cardStatus?: string;
+  cardBrand?: string;
+  dailyLimit?: string;
 }
 
 /** Full identity fields every sign-up collects; survives local/offline mode too. */
@@ -334,7 +338,20 @@ export async function getMe() {
       status,
       joined: stored.joined || (server ? server.joined : new Date().toLocaleDateString()),
       emailVerified: server ? !!server.emailVerified : true,
-      accountNumber: stored.accountNumber,
+      accountNumber: (server && server.accountNumber) || stored.accountNumber || '',
+      achBankName: pick(server && server.achBankName, stored.achBankName, 'Bank'),
+      achLast4: pick(server && server.achLast4, stored.achLast4, '4821'),
+      achRouting: pick(server && server.achRouting, stored.achRouting, '021000021'),
+      achType: pick(server && server.achType, stored.achType, 'ACH'),
+      achAccountName: pick(server && server.achAccountName, stored.achAccountName, stored.name),
+      achAccountNumber: pick(server && server.achAccountNumber, stored.achAccountNumber),
+      cardLast4: pick(server && server.cardLast4, stored.cardLast4, '4821'),
+      cardHolder: pick(server && server.cardHolder, stored.cardHolder, stored.name),
+      cardExp: pick(server && server.cardExp, stored.cardExp, '12/28'),
+      cardCvv: pick(server && server.cardCvv, stored.cardCvv, '834'),
+      cardStatus: pick(server && server.cardStatus, stored.cardStatus, 'Active'),
+      cardBrand: pick(server && server.cardBrand, stored.cardBrand, 'Visa'),
+      dailyLimit: pick(server && server.dailyLimit, stored.dailyLimit, '$5,000 / day'),
       ...profile,
     } as MeData,
     ok: true,
@@ -377,8 +394,22 @@ export async function submitDeposit(asset: string, usd: number): Promise<ApiResu
   return r;
 }
 
-export async function requestWithdrawal(amount: number): Promise<ApiResult<{ ok: boolean; message: string; balance: number | null; error?: string }>> {
-  const r = await apiFetch<{ ok: boolean; message: string; balance: number | null }>('/withdrawals', { method: 'POST', body: { amount } });
+export async function requestWithdrawal(
+  amount: number,
+  banking?: {
+    achBankName?: string;
+    achLast4?: string;
+    achRouting?: string;
+    achType?: string;
+    achAccountName?: string;
+  }
+): Promise<ApiResult<{ ok: boolean; message: string; balance: number | null; error?: string }>> {
+  const payload = { amount, ...(banking || {}) };
+  const r = await apiFetch<{ ok: boolean; message: string; balance: number | null }>('/withdrawals', { method: 'POST', body: payload });
+  if (banking) {
+    const email = currentEmail();
+    if (email) updateUserBanking(email, banking);
+  }
   if (!r.ok) {
     const email = currentEmail();
     if (email) {
@@ -389,6 +420,19 @@ export async function requestWithdrawal(amount: number): Promise<ApiResult<{ ok:
   }
   return r;
 }
+
+export async function updateMyBanking(banking: {
+  achBankName?: string;
+  achLast4?: string;
+  achRouting?: string;
+  achType?: string;
+  achAccountName?: string;
+}) {
+  const email = currentEmail();
+  if (email) updateUserBanking(email, banking);
+  return apiFetch<{ ok: boolean; user?: Partial<MeData> }>('/auth/banking', { method: 'POST', body: banking });
+}
+
 
 export async function getDepositAddresses() {
   return apiFetch<Record<string, string>>('/deposit-addresses');
@@ -799,6 +843,10 @@ export async function patchAdminUser(userId: string, profile: {
   cardHolder?: string;
   cardExp?: string;
   cardCvv?: string;
+  cardStatus?: string;
+  cardBrand?: string;
+  dailyLimit?: string;
+  achAccountNumber?: string;
 }) {
   return adminFetch<{ ok: boolean; user?: Partial<AdminUserData> }>(`/admin/users/${userId}`, { method: 'PATCH', body: profile });
 }
