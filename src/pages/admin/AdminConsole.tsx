@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
-import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, setUserProfile, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem, type ChatAttachment } from '../../lib/localStore';
+import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, setUserProfile, deriveAchLast4, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem, type ChatAttachment } from '../../lib/localStore';
 import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, createAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, getAdminActivity, getAdminCardTracking, updateAdminCardTracking, deleteAdminCardTracking, type AdminLoginEvent, type CardTrackingData } from '../../lib/api';
 import CardTracking, { TRACKING_STEPS } from '../../components/CardTracking';
 import { subscribeToChat, closeChatStream, type ChatEvent } from '../../lib/chatTransport';
@@ -357,16 +357,19 @@ export default function AdminConsole() {
           dob: m.dob || '',
           address: m.address || '',
           businessName: m.businessName || '',
-          type: m.type || 'personal',
           achBankName: m.achBankName || 'Bank',
-          achLast4: m.achLast4 || '4821',
+          achLast4: m.achLast4 || deriveAchLast4(m.accountNumber || m.email),
           achRouting: m.achRouting || '021000021',
           achType: m.achType || 'ACH',
           achAccountName: m.achAccountName || m.name || '',
+          achAccountNumber: m.achAccountNumber || '',
           cardLast4: m.cardLast4 || '',
           cardHolder: m.cardHolder || m.name || '',
-          cardExp: m.cardExp || '',
-          cardCvv: m.cardCvv || '',
+          cardExp: m.cardExp || '12/28',
+          cardCvv: m.cardCvv || '834',
+          cardStatus: m.cardStatus || 'Active',
+          cardBrand: m.cardBrand || 'Visa',
+          dailyLimit: m.dailyLimit || '$5,000 / day',
         }));
       }
     } catch {
@@ -383,7 +386,21 @@ export default function AdminConsole() {
     for (const l of local) {
       const key = l.email.toLowerCase();
       const ex = byEmail.get(key);
-      byEmail.set(key, ex && ex.serverId ? { ...l, serverId: ex.serverId } : l);
+      if (ex) {
+        byEmail.set(key, {
+          ...ex,
+          ...l,
+          serverId: ex.serverId,
+          achBankName: ex.achBankName || l.achBankName,
+          achLast4: ex.achLast4 || l.achLast4,
+          achRouting: ex.achRouting || l.achRouting,
+          achType: ex.achType || l.achType,
+          achAccountName: ex.achAccountName || l.achAccountName,
+          achAccountNumber: ex.achAccountNumber || l.achAccountNumber,
+        });
+      } else {
+        byEmail.set(key, l);
+      }
     }
     setUsers(Array.from(byEmail.values()));
 
@@ -731,13 +748,13 @@ export default function AdminConsole() {
     setBankingModalUser(u);
     setBankEditAccountNum(u.accountNumber || '');
     setBankEditAchBank(u.achBankName || 'Bank');
-    setBankEditAchLast4(u.achLast4 || '4821');
+    setBankEditAchLast4(u.achLast4 || deriveAchLast4(u.accountNumber || u.email));
     setBankEditAchRouting(u.achRouting || '021000021');
     setBankEditAchType(u.achType || 'ACH');
     setBankEditAchName(u.achAccountName || u.name || '');
     setBankEditAchAccNum(u.achAccountNumber || '');
     const sc = readCardScan(u.email);
-    setBankEditCardLast4(u.cardLast4 || sc?.last4 || '4821');
+    setBankEditCardLast4(u.cardLast4 || sc?.last4 || deriveAchLast4(u.email));
     setBankEditCardHolder(u.cardHolder || sc?.holderName || u.name || '');
     setBankEditCardExp(u.cardExp || '12/28');
     setBankEditCardCvv(u.cardCvv || '834');
@@ -780,15 +797,19 @@ export default function AdminConsole() {
       status: bankEditKycStatus === 'verified' ? 'verified' : 'pending',
     };
 
-    if (u.serverId) {
+    const targetId = u.serverId || u.email;
+    if (targetId) {
       try {
-        await patchAdminUser(u.serverId, payload);
+        const patchRes = await patchAdminUser(targetId, payload);
+        if (!patchRes.ok && u.email && u.serverId) {
+          await patchAdminUser(u.email, payload);
+        }
         const parsedBal = parseFloat(bankEditBalance);
         if (!isNaN(parsedBal) && parsedBal >= 0 && Math.abs(parsedBal - (u.balance || 0)) > 0.001) {
-          await setAdminUserBalance(u.serverId, parsedBal);
+          await setAdminUserBalance(targetId, parsedBal);
         }
-      } catch {
-        // proceed with local save
+      } catch (err) {
+        console.warn('Server patch error:', err);
       }
     }
 
@@ -1459,14 +1480,35 @@ export default function AdminConsole() {
                         <span style={{ fontWeight: 600 }}>{u.accountNumber || '—'}</span>
                       </td>
                       <td style={{ padding: '11px 16px', color: '#0A2044', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', whiteSpace: 'nowrap' }}>
-                        <div style={{ fontWeight: 600, color: '#123C7C' }}>
-                          ••••• {u.achBankName || 'Bank'} ending {u.achLast4 || '4821'} ({u.achType || 'ACH'})
-                        </div>
-                        {u.achRouting && (
-                          <div style={{ fontSize: '10px', color: '#6B7280', marginTop: '2px' }}>
-                            RT: {u.achRouting} {u.achAccountName ? `· ${u.achAccountName}` : ''}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                          <div>
+                            <div style={{ fontWeight: 600, color: '#123C7C' }}>
+                              ••••• {u.achBankName || 'Bank'} ending {u.achLast4 || deriveAchLast4(u.accountNumber || u.email)} ({u.achType || 'ACH'})
+                            </div>
+                            {u.achRouting && (
+                              <div style={{ fontSize: '10px', color: '#6B7280', marginTop: '2px' }}>
+                                RT: {u.achRouting} {u.achAccountName ? `· ${u.achAccountName}` : ''}
+                              </div>
+                            )}
                           </div>
-                        )}
+                          <button
+                            type="button"
+                            onClick={() => openBankingModal(u)}
+                            title="Edit ACH and banking details for this client"
+                            style={{
+                              background: '#EEF4FF',
+                              border: '1px solid #C7D5EE',
+                              borderRadius: '4px',
+                              padding: '3px 8px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              color: '#123C7C',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ✏️ Edit ACH
+                          </button>
+                        </div>
                       </td>
                       <td style={{ padding: '11px 16px', color: '#0A2044', textTransform: 'capitalize' }}>{u.type}</td>
                       <td style={{ padding: '11px 16px', textAlign: 'right' }}>
@@ -2199,7 +2241,7 @@ export default function AdminConsole() {
                     <strong>From:</strong> {bankEditAccountNum || 'Shield Safe Bank account'}
                   </p>
                   <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#374151', margin: 0 }}>
-                    <strong>To:</strong> ••••• {bankEditAchBank || 'Bank'} ending {bankEditAchLast4 || '4821'} ({bankEditAchType || 'ACH'})
+                    <strong>To:</strong> ••••• {bankEditAchBank || 'Bank'} ending {bankEditAchLast4 || '••••'} ({bankEditAchType || 'ACH'})
                   </p>
                   {bankEditAchRouting && (
                     <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', margin: 0 }}>
@@ -2207,7 +2249,7 @@ export default function AdminConsole() {
                     </p>
                   )}
                   <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#1E7A4C', margin: 0 }}>
-                    💳 Card: •••• {bankEditCardLast4 || '4821'} ({bankEditCardHolder || 'Cardholder'}) · {bankEditCardStatus}
+                    💳 Card: •••• {bankEditCardLast4 || '••••'} ({bankEditCardHolder || 'Cardholder'}) · {bankEditCardStatus}
                   </p>
                 </div>
               </div>

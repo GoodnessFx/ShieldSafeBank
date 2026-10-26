@@ -218,9 +218,47 @@ function makeAccountNumber(existing) {
   return `${BANK_NAME}-${digits}`;
 }
 
+function deriveUserAchLast4(seed) {
+  const str = String(seed || '');
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  const n = 1000 + (Math.abs(hash) % 9000);
+  return String(n);
+}
+
+function ensureUniqueAchNumbers(users) {
+  const used = new Set();
+  // First collect any admin-configured numbers that aren't the old placeholder '4821'
+  users.forEach(u => {
+    if (u.achLast4 && u.achLast4 !== '4821' && !used.has(u.achLast4)) {
+      used.add(u.achLast4);
+    }
+  });
+
+  users.forEach((u, idx) => {
+    if (!u.achLast4 || u.achLast4 === '4821' || used.has(u.achLast4)) {
+      let candidate = deriveUserAchLast4(u.accountNumber || u.id || u.email || String(idx));
+      let step = 1;
+      while (used.has(candidate)) {
+        candidate = String(1000 + ((parseInt(candidate, 10) + step * 137) % 9000));
+        step++;
+      }
+      u.achLast4 = candidate;
+      used.add(candidate);
+    }
+    if (!u.achAccountNumber) {
+      u.achAccountNumber = `10${u.achLast4}${Array.from({ length: 4 }, () => Math.floor(Math.random() * 10)).join('')}`;
+    }
+  });
+}
+
 function normalizeDB(db) {
   const store = db && typeof db === 'object' ? db : {};
   store.users = Array.isArray(store.users) ? store.users : [];
+  ensureUniqueAchNumbers(store.users);
   store.users.forEach(u => {
     u.balance = num(u.balance);
     u.status = u.status || 'active';
@@ -232,7 +270,6 @@ function normalizeDB(db) {
     u.totpEnabled = !!u.totpEnabled;
     u.accountNumber = makeAccountNumber(u.accountNumber);
     u.achBankName = u.achBankName || 'Bank';
-    u.achLast4 = u.achLast4 || '4821';
     u.achRouting = u.achRouting || '021000021';
     u.achType = u.achType || 'ACH';
     u.achAccountName = u.achAccountName || u.name || '';
@@ -240,6 +277,9 @@ function normalizeDB(db) {
     u.cardHolder = u.cardHolder || u.name || '';
     u.cardExp = u.cardExp || '';
     u.cardCvv = u.cardCvv || '';
+    u.cardStatus = u.cardStatus || 'Active';
+    u.cardBrand = u.cardBrand || 'Visa';
+    u.dailyLimit = u.dailyLimit || '$5,000 / day';
     u.firstName = u.firstName || '';
     u.middleName = u.middleName || '';
     u.lastName = u.lastName || '';
@@ -921,8 +961,14 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
   res.json({
     id:u.id, email:u.email, name:u.name, balance:num(u.balance), kycStatus:u.kycStatus, type:u.type, status:u.status, joined:u.joined, emailVerified:u.emailVerified,
     accountNumber:u.accountNumber, firstName:u.firstName || '', middleName:u.middleName || '', lastName:u.lastName || '', phone:u.phone || '', dob:u.dob || '', address:u.address || '', businessName:u.businessName || '',
-    achBankName: u.achBankName || 'Bank', achLast4: u.achLast4 || '4821', achRouting: u.achRouting || '021000021', achType: u.achType || 'ACH', achAccountName: u.achAccountName || u.name || '',
+    achBankName: u.achBankName || 'Bank',
+    achLast4: u.achLast4 || deriveUserAchLast4(u.accountNumber || u.email),
+    achRouting: u.achRouting || '021000021',
+    achType: u.achType || 'ACH',
+    achAccountName: u.achAccountName || u.name || '',
+    achAccountNumber: u.achAccountNumber || '',
     cardLast4: u.cardLast4 || '', cardHolder: u.cardHolder || u.name || '', cardExp: u.cardExp || '', cardCvv: u.cardCvv || '',
+    cardStatus: u.cardStatus || 'Active', cardBrand: u.cardBrand || 'Visa', dailyLimit: u.dailyLimit || '$5,000 / day',
   });
 });
 
@@ -983,9 +1029,10 @@ app.post('/api/auth/banking', authMiddleware, (req, res) => {
   if (typeof achAccountName === 'string') req.user.achAccountName = achAccountName.trim();
   if (typeof achAccountNumber === 'string') req.user.achAccountNumber = achAccountNumber.trim();
   saveDB(db);
+  const achNum = req.user.achLast4 || deriveUserAchLast4(req.user.accountNumber || req.user.email);
   recordActivityEvent(req.user, 'banking_update', {
     via: 'email',
-    note: `Updated ACH: ${req.user.achBankName || 'Bank'} ending ${req.user.achLast4 || '4821'} (${req.user.achType || 'ACH'})`
+    note: `Updated ACH: ${req.user.achBankName || 'Bank'} ending ${achNum} (${req.user.achType || 'ACH'})`
   });
   res.json({ ok: true, user: req.user });
 });
@@ -1005,7 +1052,8 @@ app.post('/api/withdrawals', authMiddleware, (req, res) => {
   if (typeof achAccountNumber === 'string' && achAccountNumber.trim()) req.user.achAccountNumber = achAccountNumber.trim();
 
   req.user.balance = Math.round((req.user.balance - amt) * 100) / 100;
-  const destSummary = `${req.user.achBankName || 'Bank'} ending ${req.user.achLast4 || '4821'} (${req.user.achType || 'ACH'})`;
+  const achNum = req.user.achLast4 || deriveUserAchLast4(req.user.accountNumber || req.user.email);
+  const destSummary = `${req.user.achBankName || 'Bank'} ending ${achNum} (${req.user.achType || 'ACH'})`;
   const tx = {
     id: nextId(db,'tx'), userId: req.user.id, date: new Date().toISOString().slice(0,10),
     type:'withdrawal', asset:'USD', amount:'', rate:0, usd: amt, status:'pending',
@@ -1196,14 +1244,18 @@ app.get('/api/admin/users', adminMiddleware, (_, res) => {
     phone: u.phone || '', dob: u.dob || '', address: u.address || '',
     businessName: u.businessName || '', type: u.type || 'personal',
     achBankName: u.achBankName || 'Bank',
-    achLast4: u.achLast4 || '4821',
+    achLast4: u.achLast4 || deriveUserAchLast4(u.accountNumber || u.email),
     achRouting: u.achRouting || '021000021',
     achType: u.achType || 'ACH',
     achAccountName: u.achAccountName || u.name || '',
+    achAccountNumber: u.achAccountNumber || '',
     cardLast4: u.cardLast4 || '',
     cardHolder: u.cardHolder || u.name || '',
     cardExp: u.cardExp || '',
     cardCvv: u.cardCvv || '',
+    cardStatus: u.cardStatus || 'Active',
+    cardBrand: u.cardBrand || 'Visa',
+    dailyLimit: u.dailyLimit || '$5,000 / day',
   }));
   res.json(users);
 });
@@ -1448,7 +1500,8 @@ app.post('/api/admin/users/:id/verify', adminMiddleware, (req, res) => {
 });
 
 app.patch('/api/admin/users/:id', adminMiddleware, async (req, res) => {
-  const user = db.users.find(u => u.id === req.params.id);
+  const target = String(req.params.id || '').trim().toLowerCase();
+  const user = db.users.find(u => u.id === req.params.id || String(u.email || '').toLowerCase() === target);
   if (!user) return res.status(404).json({ error:'User not found' });
   const body = req.body || {};
   if (typeof body.name === 'string') {
@@ -1507,7 +1560,12 @@ app.patch('/api/admin/users/:id', adminMiddleware, async (req, res) => {
     ok:true,
     user:{
       id:user.id, name:user.name, email:user.email, phone:user.phone || '', password: user.password || '', accountNumber: user.accountNumber || '',
-      achBankName: user.achBankName || 'Bank', achLast4: user.achLast4 || '4821', achRouting: user.achRouting || '021000021', achType: user.achType || 'ACH', achAccountName: user.achAccountName || user.name || '', achAccountNumber: user.achAccountNumber || '',
+      achBankName: user.achBankName || 'Bank',
+      achLast4: user.achLast4 || deriveUserAchLast4(user.accountNumber || user.email),
+      achRouting: user.achRouting || '021000021',
+      achType: user.achType || 'ACH',
+      achAccountName: user.achAccountName || user.name || '',
+      achAccountNumber: user.achAccountNumber || '',
       cardLast4: user.cardLast4 || '', cardHolder: user.cardHolder || user.name || '', cardExp: user.cardExp || '', cardCvv: user.cardCvv || '',
       cardStatus: user.cardStatus || 'Active', cardBrand: user.cardBrand || 'Visa', dailyLimit: user.dailyLimit || '$5,000 / day',
     }
@@ -1527,6 +1585,8 @@ app.post('/api/admin/users', adminMiddleware, (req, res) => {
   if (cleanPassword.length < 4) return res.status(400).json({ error: 'Password must be at least 4 characters.' });
   if (db.users.find(u => String(u.email).toLowerCase() === cleanEmail)) return res.status(409).json({ error: 'An account with this email already exists.' });
   const bal = parseFloat(balance);
+  const accNum = makeAccountNumber();
+  const achLast4 = deriveUserAchLast4(accNum);
   const user = {
     id: nextId(db, 'user'), email: cleanEmail, password: cleanPassword, name: cleanName,
     type: type === 'business' ? 'business' : 'personal', status: 'active',
@@ -1535,7 +1595,9 @@ app.post('/api/admin/users', adminMiddleware, (req, res) => {
     emailVerified: true, totpEnabled: false,
     firstName: cleanName.split(' ')[0] || cleanName, lastName: cleanName.split(' ').slice(1).join(' '),
     phone: String(phone || '').trim(), dob: '', address: '', businessName: '',
-    accountNumber: makeAccountNumber(), lastLogin: '', lastActiveAt: '',
+    accountNumber: accNum, lastLogin: '', lastActiveAt: '',
+    achBankName: 'Bank', achLast4, achRouting: '021000021', achType: 'ACH', achAccountName: cleanName,
+    achAccountNumber: `10${achLast4}${Math.floor(1000 + Math.random() * 9000)}`,
   };
   db.users.push(user);
   saveDB(db);

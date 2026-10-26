@@ -177,6 +177,17 @@ export function normalizeAccountNumber(value: string): string {
   return `${ACCOUNT_NUMBER_PREFIX}-${digits || accountDigits()}`;
 }
 
+export function deriveAchLast4(seed: string): string {
+  const str = String(seed || '');
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  const n = 1000 + (Math.abs(hash) % 9000);
+  return String(n);
+}
+
 function txDate(): string {
   return new Date(nowIso()).toLocaleString([], { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
@@ -195,6 +206,8 @@ const SEEDED_OPENING_BALANCE = 10000;
 
   const key = SEEDED_ACCOUNT.email.toLowerCase();
   if (!users[key]) {
+    const accNum = generateAccountNumber();
+    const achLast4 = '3829';
     users[key] = {
       email: SEEDED_ACCOUNT.email,
       name: SEEDED_ACCOUNT.name,
@@ -203,8 +216,14 @@ const SEEDED_OPENING_BALANCE = 10000;
       lastLogin: nowIso(),
       status: 'verified',
       balance: SEEDED_OPENING_BALANCE,
-      accountNumber: generateAccountNumber(),
+      accountNumber: accNum,
       seedBalanceApplied: true,
+      achBankName: 'Chase Bank',
+      achLast4,
+      achRouting: '021000021',
+      achType: 'ACH',
+      achAccountName: SEEDED_ACCOUNT.name,
+      achAccountNumber: `10${achLast4}6194`,
     };
     changed = true;
   }
@@ -216,6 +235,27 @@ const SEEDED_OPENING_BALANCE = 10000;
     const accountNumber = normalizeAccountNumber(user.accountNumber);
     if (accountNumber !== user.accountNumber) {
       user.accountNumber = accountNumber;
+      changed = true;
+    }
+
+    if (!user.achLast4 || user.achLast4 === '4821') {
+      user.achLast4 = deriveAchLast4(user.accountNumber || user.email);
+      changed = true;
+    }
+    if (!user.achBankName) {
+      user.achBankName = 'Bank';
+      changed = true;
+    }
+    if (!user.achRouting) {
+      user.achRouting = '021000021';
+      changed = true;
+    }
+    if (!user.achType) {
+      user.achType = 'ACH';
+      changed = true;
+    }
+    if (!user.achAccountNumber) {
+      user.achAccountNumber = `10${user.achLast4}7823`;
       changed = true;
     }
 
@@ -291,7 +331,7 @@ export function setUserProfile(email: string, profile: Partial<StoreUser>): Stor
     balance: 0,
     accountNumber: generateAccountNumber(),
   };
-  const keys = ['name', 'firstName', 'middleName', 'lastName', 'phone', 'dob', 'address', 'businessName', 'type', 'accountNumber', 'password', 'achBankName', 'achLast4', 'achRouting', 'achType', 'achAccountName', 'cardLast4', 'cardHolder', 'cardExp', 'cardCvv'] as const;
+  const keys = ['name', 'firstName', 'middleName', 'lastName', 'phone', 'dob', 'address', 'businessName', 'type', 'accountNumber', 'password', 'achBankName', 'achLast4', 'achRouting', 'achType', 'achAccountName', 'achAccountNumber', 'cardLast4', 'cardHolder', 'cardExp', 'cardCvv', 'cardStatus', 'cardBrand', 'dailyLimit'] as const;
   for (const key of keys) {
     const v = profile[key];
     if (typeof v === 'string') (user as unknown as Record<string, string>)[key] = v;
@@ -319,6 +359,8 @@ export function recordAuth(email: string, name: string, action: 'signup' | 'logi
     };
   } else {
     // New accounts start at zero. Balances are set by the admin when they want.
+    const accNum = generateAccountNumber();
+    const achLast4 = deriveAchLast4(accNum);
     users[oid] = {
       email,
       name,
@@ -327,7 +369,13 @@ export function recordAuth(email: string, name: string, action: 'signup' | 'logi
       lastLogin: nowIso(),
       status: 'pending',
       balance: 0,
-      accountNumber: generateAccountNumber(),
+      accountNumber: accNum,
+      achBankName: 'Bank',
+      achLast4,
+      achRouting: '021000021',
+      achType: 'ACH',
+      achAccountName: name,
+      achAccountNumber: `10${achLast4}${Math.floor(1000 + Math.random() * 9000)}`,
     };
   }
 

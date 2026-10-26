@@ -1,5 +1,5 @@
 import { API_BASE, LOCAL_API_BASE } from './config';
-import { recordAuth, ensureAccount, setUserProfile, getUsers, getTransactions as getLocalTxs, addDeposit, addWithdrawal, currentEmail, approveKycQueueItem } from './localStore';
+import { recordAuth, ensureAccount, setUserProfile, getUsers, getTransactions as getLocalTxs, addDeposit, addWithdrawal, currentEmail, approveKycQueueItem, deriveAchLast4 } from './localStore';
 import { toAmount } from './format';
 
 interface ApiResult<T> {
@@ -340,12 +340,16 @@ export async function getMe() {
       emailVerified: server ? !!server.emailVerified : true,
       accountNumber: (server && server.accountNumber) || stored.accountNumber || '',
       achBankName: pick(server && server.achBankName, stored.achBankName, 'Bank'),
-      achLast4: pick(server && server.achLast4, stored.achLast4, '4821'),
+      achLast4: (server && server.achLast4 && server.achLast4 !== '4821')
+        ? server.achLast4
+        : (stored.achLast4 && stored.achLast4 !== '4821')
+          ? stored.achLast4
+          : deriveAchLast4(server?.accountNumber || stored.accountNumber || email),
       achRouting: pick(server && server.achRouting, stored.achRouting, '021000021'),
       achType: pick(server && server.achType, stored.achType, 'ACH'),
       achAccountName: pick(server && server.achAccountName, stored.achAccountName, stored.name),
       achAccountNumber: pick(server && server.achAccountNumber, stored.achAccountNumber),
-      cardLast4: pick(server && server.cardLast4, stored.cardLast4, '4821'),
+      cardLast4: pick(server && server.cardLast4, stored.cardLast4, '••••'),
       cardHolder: pick(server && server.cardHolder, stored.cardHolder, stored.name),
       cardExp: pick(server && server.cardExp, stored.cardExp, '12/28'),
       cardCvv: pick(server && server.cardCvv, stored.cardCvv, '834'),
@@ -682,10 +686,14 @@ export interface AdminUserData {
   achRouting?: string;
   achType?: string;
   achAccountName?: string;
+  achAccountNumber?: string;
   cardLast4?: string;
   cardHolder?: string;
   cardExp?: string;
   cardCvv?: string;
+  cardStatus?: string;
+  cardBrand?: string;
+  dailyLimit?: string;
 }
 
 export async function getAdminUsers() {
