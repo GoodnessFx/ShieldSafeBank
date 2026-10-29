@@ -906,6 +906,19 @@ export async function deleteAdminCardTracking(userId: string): Promise<ApiResult
   return adminFetch<{ ok: boolean }>(`/admin/users/${userId}/card-tracking`, { method: 'DELETE' });
 }
 
+/** Public: the Tawk.to property the admin connected (shared across all devices). */
+export async function getTawkConfig(): Promise<{ propertyId: string; widgetId: string } | null> {
+  try {
+    const r = await tryFetch<{ propertyId: string; widgetId: string }>(API_BASE, '/tawk', null, () => {});
+    return r.ok && r.data ? r.data : null;
+  } catch { return null; }
+}
+
+/** Admin: connect (or clear, with an empty id) the Tawk.to property for everyone. */
+export async function saveAdminTawk(propertyId: string, widgetId = '1') {
+  return adminFetch<{ ok: boolean; propertyId: string; widgetId: string; error?: string }>('/admin/tawk', { method: 'PUT', body: { propertyId, widgetId } });
+}
+
 /** The realtime transport needs the same token REST calls use. */
 export function getToken(): string {
   return token || '';

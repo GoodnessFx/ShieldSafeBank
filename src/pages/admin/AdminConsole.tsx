@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, setUserProfile, deriveAchLast4, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem, type ChatAttachment } from '../../lib/localStore';
-import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, createAdminUser, getAdminThreads, getAdminMessages, replyThread, replyToAll, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, getAdminActivity, getAdminCardTracking, updateAdminCardTracking, deleteAdminCardTracking, type AdminLoginEvent, type CardTrackingData } from '../../lib/api';
+import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, createAdminUser, getAdminThreads, getAdminMessages, getTawkConfig, replyThread, replyToAll, saveAdminTawk, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, getAdminActivity, getAdminCardTracking, updateAdminCardTracking, deleteAdminCardTracking, type AdminLoginEvent, type CardTrackingData } from '../../lib/api';
 import CardTracking, { TRACKING_STEPS } from '../../components/CardTracking';
 import { subscribeToChat, closeChatStream, type ChatEvent } from '../../lib/chatTransport';
 import { fmtDateTime } from '../../lib/format';
@@ -288,6 +288,18 @@ export default function AdminConsole() {
     try { return (localStorage.getItem('ssb_admin_status') as 'online' | 'away' | 'offline') || 'online'; } catch { return 'online'; }
   });
   useEffect(() => { try { localStorage.setItem('ssb_admin_status', agentStatus); } catch {} }, [agentStatus]);
+  // Tawk.to (Hawk) live-chat connection configured by the admin so clients can
+  // reach support through Tawk.to and agents reply from the Tawk.to dashboard —
+  // a fallback channel that keeps working even when the ShieldSafeBank admin
+  // console chat is having issues. Works on desktop and mobile.
+  const [tawkPropertyId, setTawkPropertyId] = useState(() => {
+    try { return localStorage.getItem('ssb_tawk_property_id') || ''; } catch { return ''; }
+  });
+  const [tawkConnected, setTawkConnected] = useState(() => {
+    try { return localStorage.getItem('ssb_tawk_connected') === '1'; } catch { return false; }
+  });
+  const [tawkSaving, setTawkSaving] = useState(false);
+  const [tawkNotice, setTawkNotice] = useState('');
   // Activity tab filters: free-text search + a time-window chip.
   const [activitySearch, setActivitySearch] = useState('');
   const [activityRange, setActivityRange] = useState<'all' | '24h' | '7d' | '30d'>('all');
@@ -696,6 +708,38 @@ export default function AdminConsole() {
     // Never auto-open a thread after a broadcast; the admin stays where they are.
   }
 
+  /** Save the Tawk.to (Hawk) property id so the customer-facing widget connects
+   *  to the admin's Tawk.to dashboard. Stored on the shared server so every
+   *  customer device — desktop and mobile — loads the same widget. Agents reply
+   *  from the Tawk.to mobile app/dashboard even if this inbox has issues. */
+  async function saveTawkPropertyId() {
+    const id = tawkPropertyId.trim();
+    setTawkSaving(true);
+    setTawkNotice('');
+    try {
+      if (!id) {
+        const r = await saveAdminTawk('', '1');
+        if (!r.ok) throw new Error(r.error);
+        localStorage.removeItem('ssb_tawk_property_id');
+        localStorage.removeItem('ssb_tawk_connected');
+        setTawkConnected(false);
+        setTawkNotice('Tawk.to connection cleared.');
+        return;
+      }
+      const r = await saveAdminTawk(id);
+      if (!r.ok) throw new Error(r.error || 'Save failed.');
+      localStorage.setItem('ssb_tawk_property_id', id);
+      localStorage.setItem('ssb_tawk_connected', '1');
+      setTawkConnected(true);
+      setTawkNotice('Tawk.to connected. Customers now see the chat bubble on every page — reply from the Tawk.to dashboard/app.');
+    } catch (err) {
+      setTawkConnected(false);
+      setTawkNotice(`Could not save Tawk.to property id: ${err instanceof Error ? err.message : 'unknown error'}`);
+    } finally {
+      setTawkSaving(false);
+    }
+  }
+
   function copyAddress(key: string, value: string) {
     navigator.clipboard?.writeText(value).then(() => {
       setCopied(key);
@@ -986,6 +1030,19 @@ export default function AdminConsole() {
   }
 
   useEffect(() => { reload().catch(() => null); }, []);
+  // Load the Tawk.to property the admin connected so the inbox shows connected
+  // state even before the admin edits it again.
+  useEffect(() => {
+    if (!hasAdminToken()) return;
+    (async () => {
+      const r = await getTawkConfig();
+      if (r) {
+        setTawkPropertyId(r.propertyId || '');
+        setTawkConnected(!!(r.propertyId || ''));
+      }
+    })();
+  }, [hasAdminToken()]);
+
   // One poller, not two: a duplicate interval doubled the request rate and raced
   // itself. While signed out reload() skips the admin reads, so a rejected token
   // cannot spam the server or leave the banner stuck.
@@ -1213,6 +1270,41 @@ export default function AdminConsole() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Tawk.to (Hawk) connection — shown above the inbox when no conversation is open */}
+        {tab === 'chat' && !activeThread && (
+          <div style={{ background: '#FFFFFF', border: `1px solid ${tawkConnected ? '#1E7A4C' : '#DCE3EC'}`, borderRadius: '12px', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+              <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 700, color: '#0A2044', letterSpacing: '0.04em' }}>
+                TAWK.TO (HAWK) LIVE CHAT
+              </span>
+              <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, color: '#fff', background: tawkConnected ? '#1E7A4C' : '#6B7280', padding: '2px 8px', borderRadius: '8px' }}>
+                {tawkConnected ? 'CONNECTED' : 'NOT CONNECTED'}
+              </span>
+            </div>
+            <p style={{ margin: 0, fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', lineHeight: 1.5 }}>
+              Paste your Tawk.to Property ID (the part after embed.tawk.to/ in your widget code). Customers get the Tawk.to bubble on every page, and you reply from the Tawk.to mobile app (iOS/Android) or dashboard, even if this inbox has issues.
+            </p>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <input
+                value={tawkPropertyId}
+                onChange={e => setTawkPropertyId(e.target.value)}
+                placeholder="Tawk.to Property ID"
+                aria-label="Tawk.to Property ID"
+                style={{ flex: '1 1 200px', minWidth: 0, background: '#fff', border: '1px solid #DCE3EC', borderRadius: '8px', padding: '8px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }}
+              />
+              <button onClick={saveTawkPropertyId} disabled={tawkSaving}
+                style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#fff', background: '#123C7C', border: 'none', borderRadius: '8px', padding: '8px 16px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                {tawkConnected && tawkPropertyId.trim() ? 'UPDATE' : tawkPropertyId.trim() ? 'CONNECT' : 'DISCONNECT'}
+              </button>
+              <a href="https://dashboard.tawk.to" target="_blank" rel="noreferrer"
+                style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#123C7C', border: '1px solid #123C7C', borderRadius: '8px', padding: '8px 16px', textDecoration: 'none', whiteSpace: 'nowrap' }}>
+                OPEN TAWK.TO
+              </a>
+            </div>
+            {tawkNotice && <p role="status" style={{ margin: 0, fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#1E7A4C' }}>{tawkNotice}</p>}
           </div>
         )}
 

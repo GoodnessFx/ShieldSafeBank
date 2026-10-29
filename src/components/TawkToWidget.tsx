@@ -1,45 +1,49 @@
 /**
  * Tawk.to (a.k.a. "Hawk") live-chat widget.
  *
- * Embeds the Tawk.to chat bubble on the customer-facing app so clients can reach
- * support through Tawk.to and agents reply from the Tawk.to dashboard. This is a
- * fallback channel that keeps working even when the ShieldSafeBank admin console
- * chat is having issues.
+ * The admin connects a Tawk.to property in the admin console (Chat Inbox). It is
+ * stored on the shared server, so every customer device — desktop and mobile —
+ * loads the widget. Agents reply from the Tawk.to mobile app or dashboard, which
+ * keeps working even if the in-app admin chat has issues.
  *
- * Configure with VITE_TAWK_TO_ID (your Tawk.to property id). When unset nothing is
- * rendered, so it is safe to ship by default.
+ * Resolution order: shared server -> this browser's saved id -> VITE_TAWK_TO_ID.
+ * Nothing renders when no id is configured. The admin console itself never loads
+ * the widget (agents use the Tawk.to app instead).
  */
 import { useEffect } from 'react';
-import { TAWK_TO_PROPERTY_ID } from '../lib/config';
+import { getTawkConfig } from '../lib/api';
 
 export default function TawkToWidget() {
   useEffect(() => {
-    if (!TAWK_TO_PROPERTY_ID) return;
+    if (typeof window === 'undefined') return;
+    // Never render the customer widget inside the admin console.
+    if (window.location.pathname.includes('xk9-admin-console')) return;
+    let cancelled = false;
 
-    const scriptId = 'tawk-to-script';
-    if (document.getElementById(scriptId)) return;
+    (async () => {
+      const remote = await getTawkConfig();
+      let propertyId = remote?.propertyId || '';
+      const widgetId = remote?.widgetId || '1';
+      if (!propertyId) {
+        try { propertyId = localStorage.getItem('ssb_tawk_property_id') || ''; } catch { /* ignore */ }
+      }
+      if (!propertyId) propertyId = (import.meta.env?.VITE_TAWK_TO_ID as string | undefined) || '';
+      if (cancelled || !propertyId || document.getElementById('tawk-to-script')) return;
 
-    const script = document.createElement('script');
-    script.id = scriptId;
-    script.type = 'text/javascript';
-    script.async = true;
-    script.src = `https://embed.tawk.to/${TAWK_TO_PROPERTY_ID}/1`;
-    script.charset = 'UTF-8';
-    script.crossOrigin = '*';
+      const w = window as any;
+      w.Tawk_API = w.Tawk_API || {};
+      w.Tawk_LoadStart = new Date();
+      const script = document.createElement('script');
+      script.id = 'tawk-to-script';
+      script.async = true;
+      script.src = `https://embed.tawk.to/${propertyId}/${widgetId}`;
+      script.charset = 'UTF-8';
+      script.setAttribute('crossorigin', '*');
+      document.head.appendChild(script);
+    })();
 
-    // Tawk.to reads a global Tawk_API object before the script loads.
-    (window as any).Tawk_API = (window as any).Tawk_API || {};
-    (window as any).Tawk_LoadStart = new Date();
-
-    const first = document.getElementsByTagName('script')[0];
-    first.parentNode!.insertBefore(script, first);
-
-    return () => {
-      try { script.remove(); } catch {}
-      const el = document.getElementById(scriptId);
-      if (el) el.remove();
-    };
-  }, [TAWK_TO_PROPERTY_ID]);
+    return () => { cancelled = true; };
+  }, []);
 
   return null;
 }

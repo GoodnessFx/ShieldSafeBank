@@ -680,6 +680,28 @@ app.get('/api/admin/ping', adminMiddleware, (_, res) => {
 
 let db = normalizeDB({});
 
+// Tawk.to (Hawk) live-chat property id. Public read so every customer device can
+// load the widget; only an admin can change it.
+app.get('/api/tawk', (_, res) => {
+  const s = (db.settings && db.settings.tawk) || {};
+  res.json({ propertyId: String(s.propertyId || ''), widgetId: String(s.widgetId || '1') });
+});
+
+app.put('/api/admin/tawk', adminMiddleware, (req, res) => {
+  const propertyId = String((req.body && req.body.propertyId) || '').trim();
+  const widgetId = String((req.body && req.body.widgetId) || '1').trim() || '1';
+  if (propertyId && !/^[A-Za-z0-9]{10,40}$/.test(propertyId)) {
+    return res.status(400).json({ error: 'That does not look like a Tawk.to Property ID.' });
+  }
+  if (!/^[A-Za-z0-9]{1,40}$/.test(widgetId)) {
+    return res.status(400).json({ error: 'Invalid widget id.' });
+  }
+  db.settings = db.settings && typeof db.settings === 'object' ? db.settings : {};
+  db.settings.tawk = { propertyId, widgetId };
+  saveDB(db);
+  res.json({ ok: true, propertyId, widgetId });
+});
+
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) return res.status(401).json({ error:'Missing token' });
