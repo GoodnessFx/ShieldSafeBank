@@ -44,3 +44,12 @@ export const API_BASE = envBase || (isLocalHost ? '/api' : HOSTED_API_BASE);
  * configured backend can't be reached.
  */
 export const LOCAL_API_BASE = 'http://localhost:4000/api';
+
+/**
+ * Tawk.to (a.k.a. "Hawk") live-chat property id.
+ * Set VITE_TAWK_TO_ID at build time to embed the Tawk.to chat widget so customers
+ * can reach support through Tawk.to and agents reply from the Tawk.to dashboard —
+ * a fallback channel that keeps working even when the ShieldSafeBank admin console
+ * chat is having issues. Empty = widget is not rendered.
+ */
+export const TAWK_TO_PROPERTY_ID = (import.meta.env?.VITE_TAWK_TO_ID as string | undefined) || '';

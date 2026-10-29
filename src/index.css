@@ -33,6 +33,13 @@ body {
   margin: 0;
 }
 
+/* Prevent page-level horizontal scroll so the admin console never wanders
+   sideways. Inner containers that legitimately need to scroll (the wide users
+   data table, tab strips, chat thread list) keep overflow-x: auto on themselves. */
+html, body {
+  overflow-x: hidden;
+}
+
 .font-display {
   font-family: var(--font-display);
 }

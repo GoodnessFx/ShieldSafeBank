@@ -47,6 +47,16 @@ function lastActiveLabel(lastActiveAt?: string): string {
   return `Last seen ${fmtDateTime(lastActiveAt)}`;
 }
 
+/** Human label + dot colour for the agent's own online / away / offline status. */
+function agentStatusBadge(status: 'online' | 'away' | 'offline') {
+  const map: Record<'online' | 'away' | 'offline', { label: string; color: string }> = {
+    online: { label: 'Online', color: '#1E7A4C' },
+    away: { label: 'Away', color: '#9A6B00' },
+    offline: { label: 'Offline', color: '#DC2626' },
+  };
+  return map[status];
+}
+
 /** Activity panel badge text for every tracked action. */
 const ACTIVITY_LABELS: Record<string, string> = {
   signup: 'SIGNED UP',
@@ -272,6 +282,12 @@ export default function AdminConsole() {
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [broadcastInput, setBroadcastInput] = useState('');
   const [emojiOpen, setEmojiOpen] = useState(false);
+  // Agent online / away / offline status. Persisted so it survives a refresh and
+  // is shown next to the Chat Inbox so clients know whether an agent is reachable.
+  const [agentStatus, setAgentStatus] = useState<'online' | 'away' | 'offline'>(() => {
+    try { return (localStorage.getItem('ssb_admin_status') as 'online' | 'away' | 'offline') || 'online'; } catch { return 'online'; }
+  });
+  useEffect(() => { try { localStorage.setItem('ssb_admin_status', agentStatus); } catch {} }, [agentStatus]);
   // Activity tab filters: free-text search + a time-window chip.
   const [activitySearch, setActivitySearch] = useState('');
   const [activityRange, setActivityRange] = useState<'all' | '24h' | '7d' | '30d'>('all');
@@ -569,8 +585,11 @@ export default function AdminConsole() {
       await loadThreads();
     } catch {
       setMessages(await loadMessages(id));
+    } finally {
+      // Always re-enable the composer so the reply box can never appear stuck
+      // or disabled after a failed send (the "reply box disappeared" issue).
+      sendingReplyRef.current = false;
     }
-    sendingReplyRef.current = false;
   }
 
   async function toggleLogins(serverId?: string) {
@@ -1076,6 +1095,18 @@ export default function AdminConsole() {
           <BrandMark height={18} />
           <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#0A2044', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Admin Console</span>
         </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 700, letterSpacing: '0.05em', color: '#6B7280' }}>Agent status</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: agentStatusBadge(agentStatus).color, flexShrink: 0 }} />
+            <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', fontWeight: 600, color: agentStatusBadge(agentStatus).color }}>{agentStatusBadge(agentStatus).label}</span>
+          </span>
+          <select value={agentStatus} onChange={e => setAgentStatus(e.target.value as 'online' | 'away' | 'offline')} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', padding: '3px 8px', borderRadius: '6px', border: '1px solid #DCE3EC', background: '#fff', color: '#0A2044', outline: 'none', cursor: 'pointer' }}>
+            <option value="online">Online</option>
+            <option value="away">Away</option>
+            <option value="offline">Offline</option>
+          </select>
+        </div>
         <button onClick={logout} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#6B7280', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.06em' }}>LOG OUT</button>
       </div>
 
@@ -1187,7 +1218,7 @@ export default function AdminConsole() {
 
         {/* Chat */}
         {tab === 'chat' && (
-          <div className={`admin-chat${activeThread ? ' admin-chat-open' : ''}`} style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 0, border: '1px solid #DCE3EC', borderRadius: '12px', overflow: 'hidden', background: '#FFFFFF', height: '600px' }}>
+          <div className={`admin-chat${activeThread ? ' admin-chat-open' : ''}`} style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 0, border: '1px solid #DCE3EC', borderRadius: '12px', overflow: 'hidden', background: '#FFFFFF', minHeight: '520px', height: '600px' }}>
             {/* Thread list */}
             <div className="admin-threads" style={{ borderRight: '1px solid #DCE3EC', overflowY: 'auto', background: '#FFFFFF' }}>
               {/* Reply to everyone — broadcast one message to all conversations */}
