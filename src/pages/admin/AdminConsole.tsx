@@ -335,8 +335,8 @@ export default function AdminConsole() {
   // tier sleeps itself; the first probe each sitting is slow, so retry twice
   // with patience instead of condemning the whole panel instantly.
   async function checkServerLiveness(): Promise<{ online: boolean; auth: boolean }> {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const probe = await pingAdminServer(attempt === 0 ? 12000 : 20000);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const probe = await pingAdminServer(attempt === 0 ? 10000 : 15000);
       if (probe.online) {
         setServerOnline(true);
         setAuthStale(false);
@@ -347,7 +347,7 @@ export default function AdminConsole() {
         setAuthStale(true);
         return { online: false, auth: true };
       }
-      if (attempt < 2) await new Promise(res => setTimeout(res, 4000));
+      if (attempt < 1) await new Promise(res => setTimeout(res, 2000));
     }
     setServerOnline(false);
     setAuthStale(adminAuthExpired());
