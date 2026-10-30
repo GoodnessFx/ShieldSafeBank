@@ -18,6 +18,9 @@ export default function AdminLogin() {
       if (!r.ok) { setLoading(false); setError(r.data && r.data.error ? r.data.error : 'Invalid admin credentials.'); return; }
       setLoading(false);
       nav('/xk9-admin-console-7f3a/console');
+    }).catch(() => {
+      setLoading(false);
+      setError('Unable to connect. Please check your internet and try again.');
     });
   }
 
