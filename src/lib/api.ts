@@ -1,5 +1,5 @@
 import { API_BASE, LOCAL_API_BASE } from './config';
-import { recordAuth, ensureAccount, setUserProfile, getUsers, getTransactions as getLocalTxs, addDeposit, addWithdrawal, currentEmail, approveKycQueueItem, deriveAchLast4 } from './localStore';
+import { recordAuth, ensureAccount, setUserProfile, getUsers, getTransactions as getLocalTxs, addDeposit, addWithdrawal, currentEmail, approveKycQueueItem, deriveAchLast4, updateUserBanking } from './localStore';
 import { toAmount } from './format';
 
 interface ApiResult<T> {
