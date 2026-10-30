@@ -22,6 +22,9 @@ export default function Login() {
       setLoading(false);
       localStorage.setItem('ssb_auth', '1');
       nav('/dashboard');
+    }).catch(() => {
+      setLoading(false);
+      setError('Unable to connect. Please check your internet and try again.');
     });
   }
 
@@ -33,7 +36,13 @@ export default function Login() {
         if (!r.ok && !r.offline) { setLoading(false); setError('Google sign-in could not be completed.'); return; }
         localStorage.setItem('ssb_auth', '1');
         nav('/dashboard');
+      }).catch(() => {
+        setLoading(false);
+        setError('Google sign-in could not be completed.');
       });
+    }).catch(() => {
+      setLoading(false);
+      setError('Google sign-in could not be completed.');
     });
   }
 
