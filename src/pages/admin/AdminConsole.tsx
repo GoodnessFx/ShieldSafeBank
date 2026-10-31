@@ -336,7 +336,9 @@ export default function AdminConsole() {
   // with patience instead of condemning the whole panel instantly.
   async function checkServerLiveness(): Promise<{ online: boolean; auth: boolean }> {
     for (let attempt = 0; attempt < 2; attempt++) {
-      const probe = await pingAdminServer(attempt === 0 ? 10000 : 15000);
+      // Render free-tier cold starts take 20–40s to wake from sleep, so give
+      // the probes enough time for the server to actually come back.
+      const probe = await pingAdminServer(attempt === 0 ? 25000 : 30000);
       if (probe.online) {
         setServerOnline(true);
         setAuthStale(false);
