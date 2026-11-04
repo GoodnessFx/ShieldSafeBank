@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
+import { createClient } from '@supabase/supabase-js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createHmac, timingSafeEqual, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +23,28 @@ const pool = DATABASE_URL
       max: 5,
     })
   : null;
+
+// Supabase (service role key for server-side writes; never sent to browser)
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabase = SUPABASE_URL && SUPABASE_SERVICE_KEY
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } })
+  : null;
+
+// CORS: only allow configured frontend origin(s)
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+const corsOptions = {
+  origin: ALLOWED_ORIGINS.length > 0
+    ? (origin, callback) => {
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) callback(null, true);
+        else callback(new Error(`Not allowed by CORS: ${origin}`));
+      }
+    : true,
+  credentials: true,
+};
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, data JSONB NOT NULL);
@@ -497,6 +520,33 @@ function userIdFromToken(token) {
   return timingSafeEqual(given, expected) ? id : null;
 }
 
+/** Verify a Supabase JWT and return the user's uuid, or null if invalid. */
+async function verifySupabaseJwt(token) {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data || !data.user) return null;
+    return data.user.id;
+  } catch {
+    return null;
+  }
+}
+
+/** Verify a Supabase JWT and confirm the user has the admin role. */
+async function verifySupabaseAdminJwt(token) {
+  const userId = await verifySupabaseJwt(token);
+  if (!userId) return null;
+  try {
+    const { data } = await supabase.auth.admin.getUserById(userId);
+    if (!data || !data.user) return null;
+    const appMeta = data.user.app_metadata || {};
+    if (appMeta.role !== 'admin') return null;
+    return userId;
+  } catch {
+    return null;
+  }
+}
+
 function nextId(db, type) {
   db.counters[type] = (db.counters[type] || 0) + 1;
   const prefixes = { user:'U', tx:'T', thread:'C', kyc:'K', support:'S', login:'L', activity:'A' };
@@ -661,7 +711,7 @@ function chatRateLimited(userId) {
  * ------------------------------------------------------------------------- */
 
 const app = express();
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ limit: '25mb', extended: true }));
 
@@ -702,14 +752,35 @@ app.put('/api/admin/tawk', adminMiddleware, (req, res) => {
   res.json({ ok: true, propertyId, widgetId });
 });
 
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) return res.status(401).json({ error:'Missing token' });
-  const userId = userIdFromToken(header.slice(7));
-  if (!userId) return res.status(401).json({ error:'Invalid token' });
-  req.user = db.users.find(u => u.id === userId);
-  if (!req.user) return res.status(401).json({ error:'User not found' });
-  next();
+  const token = header.slice(7);
+
+  // Try Supabase JWT first
+  const supabaseUserId = await verifySupabaseJwt(token);
+  if (supabaseUserId) {
+    const user = db.users.find(u => u.auth_id === supabaseUserId);
+    if (user) {
+      req.user = user;
+      req.user.supabaseUserId = supabaseUserId;
+      return next();
+    }
+    // User exists in Supabase Auth but not yet migrated to our store
+    return res.status(401).json({ error:'Account not yet migrated. Please log in again.' });
+  }
+
+  // Fall back to legacy HMAC token
+  const legacyUserId = userIdFromToken(token);
+  if (legacyUserId) {
+    const user = db.users.find(u => u.id === legacyUserId);
+    if (user) {
+      req.user = user;
+      return next();
+    }
+  }
+
+  return res.status(401).json({ error:'Invalid token' });
 }
 
 function adminMiddleware(req, res, next) {
@@ -720,6 +791,18 @@ function adminMiddleware(req, res, next) {
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
     return res.status(401).json({ error:'Invalid admin token' });
   }
+  next();
+}
+
+/** Verify Supabase JWT and confirm admin role. */
+async function supabaseAdminMiddleware(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) return res.status(401).json({ error:'Missing token' });
+  const token = header.slice(7);
+  const userId = await verifySupabaseAdminJwt(token);
+  if (!userId) return res.status(401).json({ error:'Invalid admin token' });
+  req.user = db.users.find(u => u.auth_id === userId);
+  if (!req.user) return res.status(401).json({ error:'Admin user not found' });
   next();
 }
 
@@ -748,13 +831,97 @@ app.post('/api/auth/register', (req, res) => {
   res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
 });
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error:'Email and password are required.' });
+
   const user = db.users.find(u => u.email === email);
   if (!user) return res.status(401).json({ error:'Invalid credentials.' });
-  if (user.password !== password) return res.status(401).json({ error:'Invalid credentials.' });
   if (user.status === 'suspended') return res.status(403).json({ error:'Account is suspended.' });
+
+  // Phase 9: Users with empty password must use "Forgot password"
+  if (!user.password || user.password.length === 0) {
+    return res.status(401).json({ error:'Please use "Forgot password" to reset your password.' });
+  }
+
+  // Phase 8: If already migrated to Supabase Auth, direct them to Supabase login
+  if (user.data && user.data.passwordMigrated && user.auth_id) {
+    return res.status(401).json({ error:'Account has been migrated. Please sign in through Supabase Auth.' });
+  }
+
+  // Verify legacy password (plaintext comparison - the old server's method)
+  if (user.password !== password) return res.status(401).json({ error:'Invalid credentials.' });
+
+  // Phase 8: Migrate to Supabase Auth
+  if (supabase) {
+    try {
+      // Create the auth user via Supabase admin API
+      const { data: authData, error: createError } = await supabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: user.emailVerified === true,
+        user_metadata: { name: user.name, full_name: user.name },
+      });
+
+      if (createError && !createError.message.includes('already registered')) {
+        console.error('[login] Supabase user creation failed:', createError.message);
+        return res.status(500).json({ error:'Account migration failed. Please contact support.' });
+      }
+
+      let authUserId;
+      if (createError && createError.message.includes('already registered')) {
+        // Auth user already exists - try to sign in
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (signInError) {
+          return res.status(401).json({ error:'Invalid credentials.' });
+        }
+        authUserId = signInData.user.id;
+      } else {
+        authUserId = authData.user.id;
+      }
+
+      // Save auth_id to users.data and users.auth_id
+      user.auth_id = authUserId;
+      if (!user.data) user.data = {};
+      user.data.auth_id = authUserId;
+      user.data.passwordMigrated = true;
+      user.data.mustChangePassword = true;
+      user.data.password = null; // Remove plaintext password
+
+      user.lastLogin = new Date().toISOString();
+      user.lastActiveAt = user.lastLogin;
+      recordLoginEvent(user);
+      saveDB(db);
+
+      // Return Supabase session
+      const { data: session } = await supabase.auth.signInWithPassword({ email, password });
+      res.json({
+        token: session?.access_token || '',
+        supabaseUserId: authUserId,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          balance: user.balance,
+          kycStatus: user.kycStatus,
+          type: user.type,
+          accountNumber: user.accountNumber,
+          auth_id: authUserId,
+          mustChangePassword: true,
+        },
+      });
+      return;
+    } catch (err) {
+      console.error('[login] Migration error:', err);
+      return res.status(500).json({ error:'Account migration failed. Please contact support.' });
+    }
+  }
+
+  // Legacy fallback (no Supabase configured)
+  if (user.password !== password) return res.status(401).json({ error:'Invalid credentials.' });
   const token = userToken(user.id);
   user.lastLogin = new Date().toISOString();
   user.lastActiveAt = user.lastLogin;
