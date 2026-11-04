@@ -49,8 +49,6 @@ const SEED = {
     { id:'U004', email:'linwei@example.com', password:'demo1234', name:'Lin Wei', type:'personal', status:'active', balance:0, kycStatus:'in_review', joined:'2025-09-11', emailVerified:true, totpEnabled:false },
     { id:'U005', email:'amara.d@example.com', password:'demo1234', name:'Amara Diallo', type:'personal', status:'active', balance:3200.00, kycStatus:'approved', joined:'2025-09-01', emailVerified:true, totpEnabled:true },
     { id:'U006', email:'mbellini@example.com', password:'demo1234', name:'Marco Bellini', type:'personal', status:'suspended', balance:0, kycStatus:'rejected', joined:'2025-08-20', emailVerified:true, totpEnabled:true },
-    { id:'U0011', email:'daniel.washington@example.com', password:'Daniel2026', name:'Daniel Washington', type:'personal', status:'active', balance:60000, kycStatus:'approved', joined:'2026-09-20', emailVerified:true, totpEnabled:true },
-    { id:'U0012', email:'sandi.magallanes@example.com', password:'Sandi2026', name:'Sandi Magallanes', type:'personal', status:'active', balance:60000, kycStatus:'approved', joined:'2026-09-20', emailVerified:true, totpEnabled:true },
   ],
   transactions: [
     { id:'T001', userId:'U001', date:'2025-09-10', type:'deposit', asset:'BTC', amount:'0.25', rate:67842.50, usd:16875.83, status:'completed' },
