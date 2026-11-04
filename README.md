@@ -38,16 +38,16 @@ The Vite dev server proxies `/api` to the backend on `localhost:4000`. If the AP
 
 ## Demo Credentials
 
-| Role | URL | Email | Password | 2FA |
-|------|-----|-------|----------|-----|
-| Customer (balance $17,760.94) | `/login` | `demo@shieldsafebank.com` | `demo1234` | simulated |
-| Admin | `/xk9-admin-console-7f3a` | `admin@shieldsafebank.com` | `admin1234` | `123456` |
+| Role | Access |
+|------|--------|
+| Customer | `/login` — sign up or log in through Supabase Auth |
+| Admin | Hidden route — created in Supabase dashboard with `app_metadata.role = 'admin'` |
 
-New registrations are created with realistic seed data (KYC status, balances, transactions, support threads) so the admin console always has something to review.
+New registrations are created through Supabase Auth. The admin user is created by the operator in the Supabase dashboard.
 
 ## Admin Console
 
-The admin console lives at `/xk9-admin-console-7f3a` and is intentionally unlinked from the public site. Sign in with the admin credentials above to access:
+The admin console lives at a hidden route configured in PXXL environment variables. Sign in through Supabase Auth with the admin account you created in the Supabase dashboard.
 
 - **Chat Inbox** — view and reply to support threads
 - **Users** — manage customer accounts

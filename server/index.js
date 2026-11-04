@@ -385,8 +385,7 @@ function saveDB(store) {
  * Tokens are now a keyed HMAC - of the user id, or of the fixed `admin` scope -
  * so they stay valid across restarts and redeploys with no server-side state.
  *
- * Demo caveat: the key is a constant in an app whose admin credentials are
- * already public (admin@shieldsafebank.com / admin1234). A real deployment should
+ * Demo caveat: the key is a constant. A real deployment should
  * read SESSION_SECRET from the environment and rotate it.
  */
 const SESSION_SECRET = process.env.SESSION_SECRET || '';
