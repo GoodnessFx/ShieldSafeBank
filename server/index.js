@@ -66,12 +66,12 @@ const BANK_NAME = 'Shield Safe Bank';
 
 const SEED = {
   users: [
-    { id:'U001', email:'demo@shieldsafebank.com', password:'demo1234', name:'Demo User', type:'personal', status:'active', balance:17760.94, kycStatus:'approved', joined:'2025-08-10', emailVerified:true, totpEnabled:true },
-    { id:'U002', email:'elena@example.com', password:'demo1234', name:'Elena Vasquez', type:'personal', status:'active', balance:24380.00, kycStatus:'approved', joined:'2025-08-02', emailVerified:true, totpEnabled:true },
-    { id:'U003', email:'james.o@example.com', password:'demo1234', name:'James Okonkwo', type:'personal', status:'active', balance:7915.50, kycStatus:'approved', joined:'2025-08-14', emailVerified:true, totpEnabled:true },
-    { id:'U004', email:'linwei@example.com', password:'demo1234', name:'Lin Wei', type:'personal', status:'active', balance:0, kycStatus:'in_review', joined:'2025-09-11', emailVerified:true, totpEnabled:false },
-    { id:'U005', email:'amara.d@example.com', password:'demo1234', name:'Amara Diallo', type:'personal', status:'active', balance:3200.00, kycStatus:'approved', joined:'2025-09-01', emailVerified:true, totpEnabled:true },
-    { id:'U006', email:'mbellini@example.com', password:'demo1234', name:'Marco Bellini', type:'personal', status:'suspended', balance:0, kycStatus:'rejected', joined:'2025-08-20', emailVerified:true, totpEnabled:true },
+    { id:'U001', email:'demo@shieldsafebank.com', password:null, name:'Demo User', type:'personal', status:'active', balance:17760.94, kycStatus:'approved', joined:'2025-08-10', emailVerified:true, totpEnabled:true, data:{passwordMigrated:false,mustChangePassword:true} },
+    { id:'U002', email:'elena@example.com', password:null, name:'Elena Vasquez', type:'personal', status:'active', balance:24380.00, kycStatus:'approved', joined:'2025-08-02', emailVerified:true, totpEnabled:true, data:{passwordMigrated:false,mustChangePassword:true} },
+    { id:'U003', email:'james.o@example.com', password:null, name:'James Okonkwo', type:'personal', status:'active', balance:7915.50, kycStatus:'approved', joined:'2025-08-14', emailVerified:true, totpEnabled:true, data:{passwordMigrated:false,mustChangePassword:true} },
+    { id:'U004', email:'linwei@example.com', password:null, name:'Lin Wei', type:'personal', status:'active', balance:0, kycStatus:'in_review', joined:'2025-09-11', emailVerified:true, totpEnabled:false, data:{passwordMigrated:false,mustChangePassword:true} },
+    { id:'U005', email:'amara.d@example.com', password:null, name:'Amara Diallo', type:'personal', status:'active', balance:3200.00, kycStatus:'approved', joined:'2025-09-01', emailVerified:true, totpEnabled:true, data:{passwordMigrated:false,mustChangePassword:true} },
+    { id:'U006', email:'mbellini@example.com', password:null, name:'Marco Bellini', type:'personal', status:'suspended', balance:0, kycStatus:'rejected', joined:'2025-08-20', emailVerified:true, totpEnabled:true, data:{passwordMigrated:false,mustChangePassword:true} },
   ],
   transactions: [
     { id:'T001', userId:'U001', date:'2025-09-10', type:'deposit', asset:'BTC', amount:'0.25', rate:67842.50, usd:16875.83, status:'completed' },
@@ -389,7 +389,10 @@ function saveDB(store) {
  * already public (admin@shieldsafebank.com / admin1234). A real deployment should
  * read SESSION_SECRET from the environment and rotate it.
  */
-const SESSION_SECRET = process.env.SESSION_SECRET || 'shieldsafebank-demo-session-key-v1';
+const SESSION_SECRET = process.env.SESSION_SECRET || '';
+if (!SESSION_SECRET) {
+  console.warn('[security] SESSION_SECRET is not set — using fallback. Set SESSION_SECRET in production.');
+}
 
 /* ---------------------------------------------------------------------------
  * Resend email helper
@@ -783,15 +786,31 @@ async function authMiddleware(req, res, next) {
   return res.status(401).json({ error:'Invalid token' });
 }
 
-function adminMiddleware(req, res, next) {
+async function adminMiddleware(req, res, next) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) return res.status(401).json({ error:'Missing token' });
-  const given = Buffer.from(String(header.slice(7)));
-  const expected = Buffer.from(adminToken());
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
-    return res.status(401).json({ error:'Invalid admin token' });
+  const token = header.slice(7);
+
+  // Try Supabase admin JWT first
+  const supabaseAdminId = await verifySupabaseAdminJwt(token);
+  if (supabaseAdminId) {
+    const user = db.users.find(u => u.auth_id === supabaseAdminId);
+    if (user) {
+      req.user = user;
+      req.user.isAdmin = true;
+      return next();
+    }
   }
-  next();
+
+  // Fall back to legacy HMAC admin token
+  const given = Buffer.from(String(token));
+  const expected = Buffer.from(adminToken());
+  if (given.length === expected.length && timingSafeEqual(given, expected)) {
+    req.user = { id: 'admin', email: 'admin@shieldsafebank.com', name: 'Admin', isAdmin: true, legacy: true };
+    return next();
+  }
+
+  return res.status(401).json({ error:'Invalid admin token' });
 }
 
 /** Verify Supabase JWT and confirm admin role. */
@@ -1863,49 +1882,74 @@ app.delete('/api/admin/users/:id/card-tracking', adminMiddleware, (req, res) => 
   res.json({ ok: true });
 });
 
-app.post('/api/admin/login', (req, res) => {
+app.post('/api/admin/login', async (req, res) => {
   const { email, password } = req.body;
-  if (email === 'admin@shieldsafebank.com' && password === 'admin1234') {
-    const token = adminToken();
-    return res.json({ token });
+  if (!email || !password) return res.status(400).json({ error:'Email and password are required.' });
+  if (!supabase) return res.status(500).json({ error:'Auth service not configured.' });
+
+  // Sign in via Supabase Auth
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error || !data || !data.user) {
+    return res.status(401).json({ error:'Invalid admin credentials.' });
   }
-  res.status(401).json({ error:'Invalid admin credentials.' });
+
+  // Confirm admin role
+  const appMeta = data.user.app_metadata || {};
+  if (appMeta.role !== 'admin') {
+    return res.status(403).json({ error:'Admin access required.' });
+  }
+
+  // Find or create the admin user record in our store
+  let adminUser = db.users.find(u => u.email === email);
+  if (!adminUser) {
+    adminUser = {
+      id: nextId(db, 'user'),
+      email,
+      password: null,
+      name: email,
+      type: 'personal',
+      status: 'active',
+      balance: 0,
+      kycStatus: 'approved',
+      joined: new Date().toISOString().slice(0, 10),
+      emailVerified: true,
+      totpEnabled: false,
+      auth_id: data.user.id,
+      data: { auth_id: data.user.id, passwordMigrated: true, mustChangePassword: false },
+    };
+    db.users.push(adminUser);
+    saveDB(db);
+  } else if (!adminUser.auth_id) {
+    adminUser.auth_id = data.user.id;
+    if (!adminUser.data) adminUser.data = {};
+    adminUser.data.auth_id = data.user.id;
+    saveDB(db);
+  }
+
+  res.json({
+    token: data.access_token,
+    supabaseUserId: data.user.id,
+    user: {
+      id: adminUser.id,
+      email: adminUser.email,
+      name: adminUser.name,
+      role: 'admin',
+    },
+  });
 });
 
 let server;
-/** Admin-requested starter account. The signup for this email never reached
- * the shared store, so the server guarantees it exists on every boot — the
- * admin can then fix the details (name, password, balance) from the panel. */
-function ensureSeedAccount() {
-  const email = 'jordynwatson2007@yahoo.com';
-  let user = db.users.find(u => String(u.email).toLowerCase() === email);
-  if (user) return;
-  user = {
-    id: nextId(db, 'user'), email, password: 'Jordyn2027', name: 'Jordyn Watson',
-    type: 'personal', status: 'active', balance: 0, kycStatus: 'approved',
-    joined: new Date().toISOString().slice(0, 10), emailVerified: true, totpEnabled: false,
-    firstName: 'Jordyn', lastName: 'Watson', phone: '', dob: '', address: '', businessName: '',
-    accountNumber: makeAccountNumber(),
-    lastLogin: '', lastActiveAt: '',
-  };
-  db.users.push(user);
-  saveDB(db);
-  recordActivityEvent(user, 'signup', { via: 'admin', note: 'Account provisioned by the bank (admin request)' });
-  console.log(`  Seeded account ${email} (password Jordyn2027)`);
-}
 
 async function main() {
   db = await loadDB();
-  ensureSeedAccount();
   // One email = one chat: merge any stray duplicate conversations that built up
   // in earlier versions so the admin inbox never shows two chats for one person.
   const removed = dedupeThreads(db);
   if (removed > 0) { console.log(`  Merged ${removed} duplicate chat thread(s).`); await saveDB(db); }
   server = app.listen(PORT, () => {
-    console.log(`\n  Shield Safe Bank demo server running on http://localhost:${PORT}\n`);
+    console.log(`\n  Shield Safe Bank server running on http://localhost:${PORT}\n`);
     console.log(`  Storage: ${pool ? 'Postgres (DATABASE_URL)' : 'local store.json'}`);
-    console.log(`  Demo login:  demo@shieldsafebank.com / demo1234`);
-    console.log(`  Admin login: admin@shieldsafebank.com / admin1234\n`);
+    console.log(`  Supabase: ${supabase ? 'connected' : 'not configured'}\n`);
   });
 }
 main().catch(err => {
