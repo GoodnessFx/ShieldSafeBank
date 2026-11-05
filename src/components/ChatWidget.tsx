@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router';
 import { chatIdentity, pushChatMessage, getThreadMessages, markThreadRead, type ChatMessage, type ChatAttachment } from '../lib/localStore';
 import { getMyChatThread, sendChatMessage, markMyChatRead, getChatPresence, sendChatTyping } from '../lib/api';
-import { subscribeToChat, closeChatStream, getOrCreateConversation } from '../lib/supabaseChat';
+import { subscribeToChat, closeChatStream } from '../lib/chatTransport';
 
 /** Quick-pick emojis for the composer — typing them directly works too. */
 const CHAT_EMOJIS = ['😀','😊','😂','🥰','😍','😎','😌','😅','🤣','👍','👏','👋','👌','🫶','💯','✅','🔥','🎉','❤️','💰','🏦','📲','⏰','🙋'];
@@ -92,42 +92,32 @@ export default function ChatWidget() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedIn]);
 
-  // Live updates via Supabase Realtime: admin replies appear the moment they are
-  // sent, blue ticks update when the admin reads — even while the widget is closed.
+  // Live updates over the shared server's SSE stream (the same backend the REST
+  // chat writes to). The server filters a customer stream to their own thread,
+  // so we simply apply the full message list it pushes. Admin replies appear
+  // the moment they are sent, and blue ticks update when the admin reads — even
+  // while the widget is closed.
   useEffect(() => {
     if (!signedIn) return;
-    const identity = chatIdentity();
-    if (!identity.email) return;
-    (async () => {
-      const conv = await getOrCreateConversation(identity.email);
-      if (!conv) return;
-      subscribeToChat(identity.email, (event) => {
-        if (event.type === 'message') {
-          if (event.payload.conversation_id !== conv.id) return;
-          const m: ChatMessage = {
-            id: event.payload.id,
-            from: event.payload.from_role === 'admin' ? 'admin' : 'user',
-            text: event.payload.text,
-            time: new Date(event.payload.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            at: event.payload.created_at,
-            read: !!event.payload.read,
-          };
-          // Reading the open widget instantly flips the admin's ticks to blue.
-          if (m.from === 'admin' && openRef.current) markMyChatRead().catch(() => null);
-          setMessages(prev => {
-            const exists = prev.some(p => p.id === m.id);
-            if (exists) return prev;
-            return [...prev, m];
-          });
-          setUnreadBadge(false);
-          return;
-        }
-        if (event.type === 'read') {
-          setMessages(prev => prev.map(m => ({ ...m, read: true })));
-          return;
-        }
-      }, { conversationId: conv.id });
-    })();
+    subscribeToChat('user', (event) => {
+      if (event.type === 'chat') {
+        if (event.messages) applyMessages(event.messages);
+        const last = event.messages && event.messages[event.messages.length - 1];
+        // Reading the open widget instantly flips the admin's ticks to blue.
+        if (last && last.from === 'admin' && openRef.current) markMyChatRead().catch(() => null);
+        return;
+      }
+      if (event.type === 'read') {
+        if (event.messages) applyMessages(event.messages);
+        return;
+      }
+      if (event.type === 'typing' && event.role === 'admin') {
+        setAgentTyping(true);
+        if (agentTypingTimer.current) window.clearTimeout(agentTypingTimer.current);
+        agentTypingTimer.current = window.setTimeout(() => setAgentTyping(false), 4000);
+        return;
+      }
+    });
     return () => { if (agentTypingTimer.current) window.clearTimeout(agentTypingTimer.current); closeChatStream(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedIn]);

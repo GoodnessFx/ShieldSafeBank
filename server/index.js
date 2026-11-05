@@ -909,14 +909,37 @@ app.post('/api/auth/login', async (req, res) => {
   if (!user) return res.status(401).json({ error:'Invalid credentials.' });
   if (user.status === 'suspended') return res.status(403).json({ error:'Account is suspended.' });
 
-  // Phase 9: Users with empty password must use "Forgot password"
-  if (!user.password || user.password.length === 0) {
-    return res.status(401).json({ error:'Please use "Forgot password" to reset your password.' });
+  // Accounts already migrated to Supabase Auth — legacy users on their second
+  // and later logins, plus everyone who signed up through the new registration
+  // flow (whose local password is intentionally null) — keep using this same
+  // login form forever. Authenticate through Supabase and return a fresh
+  // session token. This runs BEFORE the empty-password guard because a migrated
+  // user legitimately has no local password and must not be told to "reset" it.
+  if (user.data && user.data.passwordMigrated && user.auth_id) {
+    if (!supabase) return res.status(500).json({ error:'Auth service not configured.' });
+    const { data: sess, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    if (signInError || !sess || !sess.user) {
+      return res.status(401).json({ error:'Invalid credentials.' });
+    }
+    user.lastLogin = new Date().toISOString();
+    user.lastActiveAt = user.lastLogin;
+    recordLoginEvent(user);
+    saveDB(db);
+    await ensureChatConversation(user.auth_id);
+    return res.json({
+      token: sess.access_token || '',
+      supabaseUserId: user.auth_id,
+      user: {
+        id: user.id, email: user.email, name: user.name, balance: user.balance,
+        kycStatus: user.kycStatus, type: user.type, accountNumber: user.accountNumber,
+        auth_id: user.auth_id, mustChangePassword: !!(user.data && user.data.mustChangePassword),
+      },
+    });
   }
 
-  // Phase 8: If already migrated to Supabase Auth, direct them to Supabase login
-  if (user.data && user.data.passwordMigrated && user.auth_id) {
-    return res.status(401).json({ error:'Account has been migrated. Please sign in through Supabase Auth.' });
+  // Phase 9: Legacy accounts with no password must use "Forgot password".
+  if (!user.password || user.password.length === 0) {
+    return res.status(401).json({ error:'Please use "Forgot password" to reset your password.' });
   }
 
   // Verify legacy password (plaintext comparison - the old server's method)
@@ -1401,8 +1424,17 @@ app.get('/api/chat/thread', authMiddleware, (req, res) => {
 
 // Realtime stream for a signed-in customer: pushes every new message in their
 // own thread the moment it happens, so admin replies appear without polling.
-app.get('/api/chat/stream', (req, res) => {
-  const userId = userIdFromToken(String(req.query.token || ''));
+app.get('/api/chat/stream', async (req, res) => {
+  let userId = userIdFromToken(String(req.query.token || ''));
+  // Login now returns Supabase JWTs; accept those too (EventSource cannot set
+  // headers, so the token travels in the query string).
+  if (!userId) {
+    const supabaseUserId = await verifySupabaseJwt(String(req.query.token || ''));
+    if (supabaseUserId) {
+      const user = db.users.find(u => u.auth_id === supabaseUserId);
+      if (user) userId = user.id;
+    }
+  }
   if (!userId) return res.status(401).json({ error: 'Missing or invalid token' });
   const user = db.users.find(u => u.id === userId);
   if (!user) return res.status(401).json({ error: 'User not found' });
@@ -1748,11 +1780,14 @@ app.get('/api/admin/users/:id/logins', adminMiddleware, (req, res) => {
 
 // Realtime stream for the admin console: pushes every customer message the
 // moment it arrives, on every thread, in every open admin browser.
-app.get('/api/admin/chat/stream', (req, res) => {
+app.get('/api/admin/chat/stream', async (req, res) => {
   const given = Buffer.from(String(req.query.token || ''));
   const expected = Buffer.from(adminToken());
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
-    return res.status(401).json({ error: 'Invalid admin token' });
+  const legacyOk = given.length === expected.length && timingSafeEqual(given, expected);
+  if (!legacyOk) {
+    // Admin consoles now hold a Supabase admin JWT; accept that too.
+    const supabaseAdminId = await verifySupabaseAdminJwt(String(req.query.token || ''));
+    if (!supabaseAdminId) return res.status(401).json({ error: 'Invalid admin token' });
   }
   openChatStream(req, res, { isAdmin: true });
 });
