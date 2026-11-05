@@ -826,12 +826,30 @@ async function supabaseAdminMiddleware(req, res, next) {
 
 app.get('/api/rates', (_, res) => res.json({ BTC: 67842.50, USDT: 0.9998 }));
 
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   const { email, password, name, type, businessName, firstName, middleName, lastName, phone, dob, address } = req.body;
   if (!email || !password || !name) return res.status(400).json({ error:'Email, password, and name are required.' });
+  if (!supabase) return res.status(500).json({ error:'Auth service not configured.' });
   if (db.users.find(u => u.email === email)) return res.status(409).json({ error:'An account with this email already exists.' });
+
+  // Phase 10: Create Supabase Auth user directly
+  const { data: authData, error: createError } = await supabase.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: false,
+    user_metadata: { name, firstName, middleName, lastName, phone, dob, address, businessName },
+  });
+
+  if (createError) {
+    console.error('[register] Supabase user creation failed:', createError.message);
+    return res.status(500).json({ error: 'Account creation failed. Please try again.' });
+  }
+
+  const authUserId = authData.user.id;
+
+  // Create the users.data row (balance starts at 0, KYC pending)
   const user = {
-    id: nextId(db,'user'), email, password, name, type: type || 'personal',
+    id: nextId(db,'user'), email, password: null, name, type: type || 'personal',
     status:'active', balance:0, kycStatus:'pending', joined: new Date().toISOString().slice(0,10),
     emailVerified:false, totpEnabled:false,
     firstName: (firstName || '').trim(), middleName: (middleName || '').trim(),
@@ -841,12 +859,28 @@ app.post('/api/auth/register', (req, res) => {
     accountNumber: makeAccountNumber(),
     lastLogin: new Date().toISOString(),
     lastActiveAt: new Date().toISOString(),
+    auth_id: authUserId,
+    data: { auth_id: authUserId, passwordMigrated: true, mustChangePassword: false },
   };
   db.users.push(user);
   saveDB(db);
   recordActivityEvent(user, 'signup', { via: 'email' });
-  const token = userToken(user.id);
-  res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
+
+  res.json({
+    token: '',
+    supabaseUserId: authUserId,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      balance: user.balance,
+      kycStatus: user.kycStatus,
+      type: user.type,
+      accountNumber: user.accountNumber,
+      auth_id: authUserId,
+      mustChangePassword: false,
+    },
+  });
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -995,57 +1029,25 @@ app.post('/api/auth/google', async (req, res) => {
 
 app.post('/api/auth/forgot-password', async (req, res) => {
   const email = String((req.body && req.body.email) || '').trim().toLowerCase();
-  const user = email ? db.users.find(u => String(u.email).toLowerCase() === email) : null;
 
   // Always respond the same way for unknown emails (prevents email enumeration).
-  if (!user) {
-    return res.json({ ok: true, message: 'If an account exists, a reset link has been sent.' });
+  if (!email) return res.status(400).json({ error: 'Email is required.' });
+
+  if (!supabase) {
+    return res.status(500).json({ error: 'Auth service not configured.' });
   }
 
-  pruneTokens();
-  const token = randomBytes(32).toString('hex');
-  resetTokens.set(token, { userId: user.id, expiresAt: Date.now() + 30 * 60 * 1000 });
+  // Phase 10: Use Supabase Auth resetPasswordForEmail (sends reset email via Supabase)
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${(process.env.APP_URL || 'https://shieldsafebank.com').replace(/\/$/, '')}/reset-password`,
+  });
 
-  const appUrl = (process.env.APP_URL || 'https://shieldsafebank.com').replace(/\/$/, '');
-  const resetUrl = `${appUrl}/reset-password?token=${token}`;
-
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reset your password</title></head>
-<body style="margin:0;padding:0;background:#F4F6F8;font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F4F6F8;padding:40px 0;">
-    <tr><td align="center">
-      <table width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #DCE3EA;">
-        <tr><td style="background:#0A2044;padding:28px 40px;">
-          <span style="font-size:20px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">Shield Safe Bank</span>
-        </td></tr>
-        <tr><td style="padding:40px;">
-          <h1 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#0A2044;">Reset your password</h1>
-          <p style="margin:0 0 24px;font-size:15px;color:#4A5568;line-height:1.6;">Hi ${user.name || user.email},</p>
-          <p style="margin:0 0 24px;font-size:15px;color:#4A5568;line-height:1.6;">We received a request to reset the password for your Shield Safe Bank account. Click the button below to choose a new password.</p>
-          <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;"><tr><td style="background:#123C7C;">
-            <a href="${resetUrl}" style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;">Reset Password</a>
-          </td></tr></table>
-          <p style="margin:0 0 16px;font-size:13px;color:#6B7280;line-height:1.6;">Or paste this link in your browser:<br><a href="${resetUrl}" style="color:#123C7C;word-break:break-all;">${resetUrl}</a></p>
-          <p style="margin:0 0 0;font-size:13px;color:#9CA3AF;line-height:1.6;">This link expires in <strong>30 minutes</strong>. If you did not request a password reset, you can safely ignore this email — your password will not change.</p>
-        </td></tr>
-        <tr><td style="background:#F4F6F8;border-top:1px solid #DCE3EA;padding:20px 40px;font-size:12px;color:#9CA3AF;">
-          &copy; ${new Date().getFullYear()} Shield Safe Bank. All rights reserved.
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`;
-
-  const result = await sendMail({ to: user.email, subject: 'Reset your Shield Safe Bank password', html });
-  if (!result.ok) {
-    // Delete the token we stored — the link will never reach the user anyway.
-    resetTokens.delete(token);
-    return res.status(500).json({ error: result.error || 'Failed to send reset email. Please try again.' });
+  // Supabase does not reveal whether the email exists (prevents email enumeration).
+  if (error) {
+    console.error('[forgot-password] Supabase reset error:', error.message);
   }
 
-  recordActivityEvent(user, 'password_reset_requested', { via: 'email' });
+  recordActivityEvent({ email }, 'password_reset_requested', { via: 'email' });
   res.json({ ok: true, message: 'If an account exists, a reset link has been sent.' });
 });
 
