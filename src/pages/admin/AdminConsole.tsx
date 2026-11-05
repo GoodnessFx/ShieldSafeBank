@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, setUserProfile, deriveAchLast4, updateUserBanking, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem, type ChatAttachment } from '../../lib/localStore';
 import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, createAdminUser, getAdminThreads, getAdminMessages, getTawkConfig, replyThread, replyToAll, saveAdminTawk, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, getAdminActivity, getAdminCardTracking, updateAdminCardTracking, deleteAdminCardTracking, type AdminLoginEvent, type CardTrackingData } from '../../lib/api';
 import CardTracking, { TRACKING_STEPS } from '../../components/CardTracking';
-import { subscribeToChat, closeChatStream, getAllConversations, getConversationMessages, sendChatMessage, markMessagesRead, closeConversation, reopenConversation, type ChatMessage as SupabaseChatMessage, type ChatConversation } from '../../lib/supabaseChat';
+import { subscribeToChat, closeChatStream } from '../../lib/chatTransport';
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
 import BrandMark from '../../components/BrandMark';
@@ -1049,32 +1049,36 @@ export default function AdminConsole() {
     return () => clearInterval(id);
   }, []);
 
-  // Realtime: new customer messages appear (and bump the unread counter) via
-  // Supabase Realtime on every open admin browser, without waiting for the 5s
-  // poll. The poll stays as a safety net.
+  // Realtime: new customer messages appear (and bump the unread counter) the
+  // moment they arrive, on every open admin browser, without waiting for the
+  // 5s poll. Delivered over the shared server's SSE stream — the same backend
+  // the REST chat writes to. The poll stays as a safety net.
   useEffect(() => {
     if (!hasAdminToken()) return;
     subscribeToChat('admin', (event) => {
-      if (event.type === 'message') {
+      if (event.type === 'chat') {
         loadThreads().catch(() => null);
-        if (activeThread === event.payload.conversation_id) {
-          setMessages(await loadMessages(activeThread));
-          const last = event.payload;
-          if (last && last.from_role === 'user') markAdminThreadRead(event.payload.conversation_id).catch(() => null);
+        if (activeThread && event.threadId === activeThread) {
+          loadMessages(activeThread).then(setMessages).catch(() => null);
+          // A new customer message just landed in the open thread — mark it read.
+          if (event.thread && event.thread.unread) markAdminThreadRead(activeThread).catch(() => null);
         }
         return;
       }
       if (event.type === 'read') {
-        if (activeThread === event.payload.conversation_id) {
-          setMessages(await loadMessages(activeThread));
+        if (activeThread && event.threadId === activeThread) {
+          loadMessages(activeThread).then(setMessages).catch(() => null);
         }
         return;
       }
-      if (event.type === 'conversation') {
-        loadThreads().catch(() => null);
+      if (event.type === 'typing' && event.role === 'user' && event.threadId) {
+        setTypingMap(prev => ({ ...prev, [event.threadId]: true }));
+        window.setTimeout(() => {
+          setTypingMap(prev => (prev[event.threadId] ? { ...prev, [event.threadId]: false } : prev));
+        }, 4000);
         return;
       }
-    }, { admin: true });
+    });
     return () => { closeChatStream(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasAdminToken(), activeThread]);

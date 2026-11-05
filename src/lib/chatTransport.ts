@@ -53,7 +53,8 @@ function streamUrl(role: 'user' | 'admin'): string {
 
 /** Opens (or re-opens) the realtime stream for the given role. */
 export function subscribeToChat(role: 'user' | 'admin', listener: Listener): void {
-  if (currentRole === role && source) return;
+  // Always (re)open the stream so a fresh listener closure (e.g. the admin's
+  // current activeThread) takes effect. The previous stream is closed first.
   closeChatStream();
   currentListener = listener;
   currentRole = role;
