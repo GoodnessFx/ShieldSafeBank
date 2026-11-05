@@ -1441,6 +1441,184 @@ app.get('/api/chat/presence', (_, res) => {
   res.json({ ok: true, agents, agentOnline: agents > 0, time: new Date().toISOString() });
 });
 
+// Phase 3: Get the signed-in user's conversation (create if none exists).
+app.get('/api/chat/conversations', authMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const userId = req.user.supabaseUserId || req.user.id;
+  const { data: existing } = await supabase
+    .from('chat_conversations')
+    .select('*')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existing) return res.json({ conversation: existing });
+  const convId = `conv_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const { data: created, error } = await supabase
+    .from('chat_conversations')
+    .insert({ id: convId, user_id: userId, status: 'open' })
+    .select()
+    .maybeSingle();
+  if (error) {
+    console.error('[chat] create conversation error:', error.message);
+    return res.status(500).json({ error: 'Failed to create conversation.' });
+  }
+  res.json({ conversation: created });
+});
+
+// Phase 3: Get messages for a conversation (customer only their own).
+app.get('/api/chat/conversations/:id/messages', authMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const conversationId = req.params.id;
+  const userId = req.user.supabaseUserId || req.user.id;
+  const { data: conv } = await supabase
+    .from('chat_conversations')
+    .select('id')
+    .eq('id', conversationId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!conv) return res.status(403).json({ error: 'Not your conversation.' });
+  const { data: messages, error } = await supabase
+    .from('chat_messages')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true });
+  if (error) {
+    console.error('[chat] fetch messages error:', error.message);
+    return res.status(500).json({ error: 'Failed to fetch messages.' });
+  }
+  res.json({ messages: messages || [] });
+});
+
+// Phase 3: Send a message to a conversation.
+app.post('/api/chat/conversations/:id/messages', authMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const conversationId = req.params.id;
+  const { text } = req.body || {};
+  const userId = req.user.supabaseUserId || req.user.id;
+  if (!text || text.trim().length === 0) return res.status(400).json({ error: 'Message cannot be empty.' });
+  if (text.length > 2000) return res.status(400).json({ error: 'Message is too long (max 2000 characters).' });
+  const { data: conv } = await supabase
+    .from('chat_conversations')
+    .select('*')
+    .eq('id', conversationId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!conv) return res.status(403).json({ error: 'Conversation not found.' });
+  const msgId = `msg_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const { data: created, error: msgError } = await supabase
+    .from('chat_messages')
+    .insert({ id: msgId, conversation_id: conversationId, from_role: 'user', text: text.trim(), read: false })
+    .select()
+    .maybeSingle();
+  if (msgError) {
+    console.error('[chat] send message error:', msgError.message);
+    return res.status(500).json({ error: 'Failed to send message.' });
+  }
+  await supabase
+    .from('chat_conversations')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('id', conversationId);
+  res.json({ ok: true, message: created });
+});
+
+// Phase 3: Mark messages in a conversation as read.
+app.post('/api/chat/conversations/:id/read', authMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const conversationId = req.params.id;
+  const userId = req.user.supabaseUserId || req.user.id;
+  const { data: conv } = await supabase
+    .from('chat_conversations')
+    .select('id')
+    .eq('id', conversationId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!conv) return res.status(403).json({ error: 'Conversation not found.' });
+  await supabase
+    .from('chat_messages')
+    .update({ read: true })
+    .eq('conversation_id', conversationId)
+    .eq('from_role', 'admin')
+    .eq('read', false);
+  res.json({ ok: true });
+});
+
+// Phase 3: Get all conversations (admin only).
+app.get('/api/admin/chat/conversations', supabaseAdminMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const { data: conversations, error } = await supabase
+    .from('chat_conversations')
+    .select('*')
+    .order('updated_at', { ascending: false });
+  if (error) {
+    console.error('[admin chat] fetch conversations error:', error.message);
+    return res.status(500).json({ error: 'Failed to fetch conversations.' });
+  }
+  res.json({ conversations: conversations || [] });
+});
+
+// Phase 3: Get messages for a conversation (admin).
+app.get('/api/admin/chat/conversations/:id/messages', supabaseAdminMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const conversationId = req.params.id;
+  const { data: messages, error } = await supabase
+    .from('chat_messages')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true });
+  if (error) {
+    console.error('[admin chat] fetch messages error:', error.message);
+    return res.status(500).json({ error: 'Failed to fetch messages.' });
+  }
+  res.json({ messages: messages || [] });
+});
+
+// Phase 3: Admin reply to a conversation.
+app.post('/api/admin/chat/conversations/:id/messages', supabaseAdminMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const conversationId = req.params.id;
+  const { text } = req.body || {};
+  if (!text || text.trim().length === 0) return res.status(400).json({ error: 'Message cannot be empty.' });
+  if (text.length > 2000) return res.status(400).json({ error: 'Message is too long (max 2000 characters).' });
+  const msgId = `msg_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const { data: created, error } = await supabase
+    .from('chat_messages')
+    .insert({ id: msgId, conversation_id: conversationId, from_role: 'admin', text: text.trim(), read: false })
+    .select()
+    .maybeSingle();
+  if (error) {
+    console.error('[admin chat] send message error:', error.message);
+    return res.status(500).json({ error: 'Failed to send message.' });
+  }
+  await supabase
+    .from('chat_conversations')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('id', conversationId);
+  res.json({ ok: true, message: created });
+});
+
+// Phase 3: Close a conversation (admin).
+app.post('/api/admin/chat/conversations/:id/close', supabaseAdminMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const conversationId = req.params.id;
+  await supabase
+    .from('chat_conversations')
+    .update({ status: 'closed', updated_at: new Date().toISOString() })
+    .eq('id', conversationId);
+  res.json({ ok: true });
+});
+
+// Phase 3: Reopen a conversation (admin).
+app.post('/api/admin/chat/conversations/:id/reopen', supabaseAdminMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const conversationId = req.params.id;
+  await supabase
+    .from('chat_conversations')
+    .update({ status: 'open', updated_at: new Date().toISOString() })
+    .eq('id', conversationId);
+  res.json({ ok: true });
+});
+
 app.get('/api/admin/users', adminMiddleware, (_, res) => {
   const users = db.users.map(u => ({
     id:u.id, name:u.name, email:u.email, accountNumber:u.accountNumber,
