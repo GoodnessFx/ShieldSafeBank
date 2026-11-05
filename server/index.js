@@ -299,7 +299,6 @@ function normalizeDB(db) {
     u.cardLast4 = u.cardLast4 || '';
     u.cardHolder = u.cardHolder || u.name || '';
     u.cardExp = u.cardExp || '';
-    u.cardCvv = u.cardCvv || '';
     u.cardStatus = u.cardStatus || 'Active';
     u.cardBrand = u.cardBrand || 'Visa';
     u.dailyLimit = u.dailyLimit || '$5,000 / day';
@@ -883,6 +882,25 @@ app.post('/api/auth/register', async (req, res) => {
   });
 });
 
+/** Ensure a chat_conversations row exists for the given supabase user id. */
+async function ensureChatConversation(supabaseUserId) {
+  if (!supabase) return;
+  try {
+    const { data: existing } = await supabase
+      .from('chat_conversations')
+      .select('id')
+      .eq('user_id', supabaseUserId)
+      .maybeSingle();
+    if (existing) return;
+    const convId = `conv_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    await supabase
+      .from('chat_conversations')
+      .insert({ id: convId, user_id: supabaseUserId, status: 'open' });
+  } catch (err) {
+    console.error('[login] ensureChatConversation error:', err);
+  }
+}
+
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error:'Email and password are required.' });
@@ -948,6 +966,9 @@ app.post('/api/auth/login', async (req, res) => {
       recordLoginEvent(user);
       saveDB(db);
 
+      // Ensure a chat conversation exists for this user
+      await ensureChatConversation(authUserId);
+
       // Return Supabase session
       const { data: session } = await supabase.auth.signInWithPassword({ email, password });
       res.json({
@@ -979,6 +1000,7 @@ app.post('/api/auth/login', async (req, res) => {
   user.lastActiveAt = user.lastLogin;
   recordLoginEvent(user);
   saveDB(db);
+  // Legacy users don't have Supabase auth uuids, so no chat_conversations row is created here.
   res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
 });
 
@@ -1176,7 +1198,7 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
     achType: u.achType || 'ACH',
     achAccountName: u.achAccountName || u.name || '',
     achAccountNumber: u.achAccountNumber || '',
-    cardLast4: u.cardLast4 || '', cardHolder: u.cardHolder || u.name || '', cardExp: u.cardExp || '', cardCvv: u.cardCvv || '',
+    cardLast4: u.cardLast4 || '', cardHolder: u.cardHolder || u.name || '', cardExp: u.cardExp || '',
     cardStatus: u.cardStatus || 'Active', cardBrand: u.cardBrand || 'Visa', dailyLimit: u.dailyLimit || '$5,000 / day',
   });
 });
@@ -1639,7 +1661,6 @@ app.get('/api/admin/users', adminMiddleware, (_, res) => {
     cardLast4: u.cardLast4 || '',
     cardHolder: u.cardHolder || u.name || '',
     cardExp: u.cardExp || '',
-    cardCvv: u.cardCvv || '',
     cardStatus: u.cardStatus || 'Active',
     cardBrand: u.cardBrand || 'Visa',
     dailyLimit: u.dailyLimit || '$5,000 / day',
@@ -1912,7 +1933,6 @@ app.patch('/api/admin/users/:id', adminMiddleware, async (req, res) => {
   if (typeof body.cardLast4 === 'string') user.cardLast4 = body.cardLast4.trim();
   if (typeof body.cardHolder === 'string') user.cardHolder = body.cardHolder.trim();
   if (typeof body.cardExp === 'string') user.cardExp = body.cardExp.trim();
-  if (typeof body.cardCvv === 'string') user.cardCvv = body.cardCvv.trim();
   if (typeof body.cardStatus === 'string') user.cardStatus = body.cardStatus.trim();
   if (typeof body.cardBrand === 'string') user.cardBrand = body.cardBrand.trim();
   if (typeof body.dailyLimit === 'string') user.dailyLimit = body.dailyLimit.trim();
@@ -1953,7 +1973,7 @@ app.patch('/api/admin/users/:id', adminMiddleware, async (req, res) => {
       achType: user.achType || 'ACH',
       achAccountName: user.achAccountName || user.name || '',
       achAccountNumber: user.achAccountNumber || '',
-      cardLast4: user.cardLast4 || '', cardHolder: user.cardHolder || user.name || '', cardExp: user.cardExp || '', cardCvv: user.cardCvv || '',
+      cardLast4: user.cardLast4 || '', cardHolder: user.cardHolder || user.name || '', cardExp: user.cardExp || '',
       cardStatus: user.cardStatus || 'Active', cardBrand: user.cardBrand || 'Visa', dailyLimit: user.dailyLimit || '$5,000 / day',
     }
   });
@@ -2120,6 +2140,13 @@ app.post('/api/admin/login', async (req, res) => {
 let server;
 
 async function main() {
+  // Refuse to start if required environment variables are missing.
+  const requiredEnv = ['DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SESSION_SECRET'];
+  const missing = requiredEnv.filter(v => !process.env[v]);
+  if (missing.length > 0) {
+    console.error(`Missing required environment variables: ${missing.join(', ')}`);
+    process.exit(1);
+  }
   db = await loadDB();
   // One email = one chat: merge any stray duplicate conversations that built up
   // in earlier versions so the admin inbox never shows two chats for one person.

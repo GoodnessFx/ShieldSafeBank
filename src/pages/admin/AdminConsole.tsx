@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, setUserProfile, deriveAchLast4, updateUserBanking, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem, type ChatAttachment } from '../../lib/localStore';
 import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, createAdminUser, getAdminThreads, getAdminMessages, getTawkConfig, replyThread, replyToAll, saveAdminTawk, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, getAdminActivity, getAdminCardTracking, updateAdminCardTracking, deleteAdminCardTracking, type AdminLoginEvent, type CardTrackingData } from '../../lib/api';
 import CardTracking, { TRACKING_STEPS } from '../../components/CardTracking';
-import { subscribeToChat, closeChatStream, type ChatEvent } from '../../lib/chatTransport';
+import { subscribeToChat, closeChatStream, getAllConversations, getConversationMessages, sendChatMessage, markMessagesRead, closeConversation, reopenConversation, type ChatMessage as SupabaseChatMessage, type ChatConversation } from '../../lib/supabaseChat';
 import { fmtDateTime } from '../../lib/format';
 import { DEPOSIT_ADDRESSES, BTC_NETWORK, USDT_NETWORK } from '../../lib/config';
 import BrandMark from '../../components/BrandMark';
@@ -256,7 +256,6 @@ export default function AdminConsole() {
   const [bankEditCardLast4, setBankEditCardLast4] = useState('');
   const [bankEditCardHolder, setBankEditCardHolder] = useState('');
   const [bankEditCardExp, setBankEditCardExp] = useState('');
-  const [bankEditCardCvv, setBankEditCardCvv] = useState('');
   const [bankEditCardStatus, setBankEditCardStatus] = useState('Active');
   const [bankEditCardBrand, setBankEditCardBrand] = useState('Visa');
   const [bankEditDailyLimit, setBankEditDailyLimit] = useState('$5,000 / day');
@@ -396,7 +395,6 @@ export default function AdminConsole() {
           cardLast4: m.cardLast4 || '',
           cardHolder: m.cardHolder || m.name || '',
           cardExp: m.cardExp || '12/28',
-          cardCvv: m.cardCvv || '834',
           cardStatus: m.cardStatus || 'Active',
           cardBrand: m.cardBrand || 'Visa',
           dailyLimit: m.dailyLimit || '$5,000 / day',
@@ -822,7 +820,6 @@ export default function AdminConsole() {
     setBankEditCardLast4(u.cardLast4 || sc?.last4 || deriveAchLast4(u.email));
     setBankEditCardHolder(u.cardHolder || sc?.holderName || u.name || '');
     setBankEditCardExp(u.cardExp || '12/28');
-    setBankEditCardCvv(u.cardCvv || '834');
     setBankEditCardStatus(u.cardStatus || 'Active');
     setBankEditCardBrand(u.cardBrand || 'Visa');
     setBankEditDailyLimit(u.dailyLimit || '$5,000 / day');
@@ -855,7 +852,6 @@ export default function AdminConsole() {
       cardLast4: bankEditCardLast4.trim(),
       cardHolder: bankEditCardHolder.trim(),
       cardExp: bankEditCardExp.trim(),
-      cardCvv: bankEditCardCvv.trim(),
       cardStatus: bankEditCardStatus.trim(),
       cardBrand: bankEditCardBrand.trim(),
       dailyLimit: bankEditDailyLimit.trim(),
@@ -1053,35 +1049,32 @@ export default function AdminConsole() {
     return () => clearInterval(id);
   }, []);
 
-  // Realtime: new customer messages appear (and bump the unread counter), a
-  // "typing…" badge shows while a customer is typing, and blue read ticks flip
-  // the instant a customer opens the thread — on every open admin browser,
-  // without waiting for the 5s poll. The poll stays as a safety net.
+  // Realtime: new customer messages appear (and bump the unread counter) via
+  // Supabase Realtime on every open admin browser, without waiting for the 5s
+  // poll. The poll stays as a safety net.
   useEffect(() => {
     if (!hasAdminToken()) return;
-    subscribeToChat('admin', (event: ChatEvent) => {
-      if (event.type === 'typing') {
-        if (event.role !== 'user' || !event.threadId) return;
-        setTypingMap(prev => ({ ...prev, [event.threadId]: true }));
-        window.setTimeout(() => { setTypingMap(prev => ({ ...prev, [event.threadId]: false })); }, 3000);
-        return;
-      }
-      if (event.type === 'read') {
-        if (activeThread === event.threadId && event.messages) {
-          setMessages(event.messages.map(m => ({ id: m.id, from: m.from, text: m.text, time: m.time, at: m.at, read: !!m.read })));
+    subscribeToChat('admin', (event) => {
+      if (event.type === 'message') {
+        loadThreads().catch(() => null);
+        if (activeThread === event.payload.conversation_id) {
+          setMessages(await loadMessages(activeThread));
+          const last = event.payload;
+          if (last && last.from_role === 'user') markAdminThreadRead(event.payload.conversation_id).catch(() => null);
         }
         return;
       }
-      if (!event.messages) return;
-      loadThreads().catch(() => null);
-      if (activeThread === event.threadId) {
-        setMessages(event.messages.map(m => ({ id: m.id, from: m.from, text: m.text, time: m.time, at: m.at, read: !!m.read })));
-        const last = event.messages[event.messages.length - 1];
-        // Only an incoming customer message marks a thread read; an admin's own
-        // reply must not reset the badges.
-        if (last && last.from === 'user') markAdminThreadRead(event.threadId).catch(() => null);
+      if (event.type === 'read') {
+        if (activeThread === event.payload.conversation_id) {
+          setMessages(await loadMessages(activeThread));
+        }
+        return;
       }
-    });
+      if (event.type === 'conversation') {
+        loadThreads().catch(() => null);
+        return;
+      }
+    }, { admin: true });
     return () => { closeChatStream(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasAdminToken(), activeThread]);
@@ -2288,10 +2281,6 @@ export default function AdminConsole() {
                   <div>
                     <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#4779C4', marginBottom: '4px' }}>EXPIRY (MM/YY)</label>
                     <input value={bankEditCardExp} onChange={e => setBankEditCardExp(e.target.value)} maxLength={5} placeholder="e.g. 12/28" style={{ width: '100%', background: '#FFFFFF', border: '1px solid #C7D5EE', borderRadius: '6px', padding: '8px 10px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#4779C4', marginBottom: '4px' }}>SECURITY CVV</label>
-                    <input value={bankEditCardCvv} onChange={e => setBankEditCardCvv(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))} maxLength={4} placeholder="e.g. 834" style={{ width: '100%', background: '#FFFFFF', border: '1px solid #C7D5EE', borderRadius: '6px', padding: '8px 10px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#0A2044', outline: 'none' }} />
                   </div>
                   <div>
                     <label style={{ display: 'block', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', fontWeight: 600, color: '#4779C4', marginBottom: '4px' }}>CARD BRAND</label>

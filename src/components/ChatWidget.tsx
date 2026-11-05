@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router';
 import { chatIdentity, pushChatMessage, getThreadMessages, markThreadRead, type ChatMessage, type ChatAttachment } from '../lib/localStore';
 import { getMyChatThread, sendChatMessage, markMyChatRead, getChatPresence, sendChatTyping } from '../lib/api';
-import { subscribeToChat, closeChatStream, type ChatEvent } from '../lib/chatTransport';
+import { subscribeToChat, closeChatStream, getOrCreateConversation } from '../lib/supabaseChat';
 
 /** Quick-pick emojis for the composer — typing them directly works too. */
 const CHAT_EMOJIS = ['😀','😊','😂','🥰','😍','😎','😌','😅','🤣','👍','👏','👋','👌','🫶','💯','✅','🔥','🎉','❤️','💰','🏦','📲','⏰','🙋'];
@@ -92,31 +92,42 @@ export default function ChatWidget() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedIn]);
 
-  // Live updates: admin replies appear the moment they are sent, "typing…" shows
-  // as the agent types, and blue ticks update the instant the admin reads the
-  // thread — all without waiting for the poll — even while the widget is closed.
+  // Live updates via Supabase Realtime: admin replies appear the moment they are
+  // sent, blue ticks update when the admin reads — even while the widget is closed.
   useEffect(() => {
     if (!signedIn) return;
-    subscribeToChat('user', (event: ChatEvent) => {
-      if (event.type === 'typing') {
-        if (event.role !== 'admin') return;
-        setAgentTyping(true);
-        if (agentTypingTimer.current) window.clearTimeout(agentTypingTimer.current);
-        agentTypingTimer.current = window.setTimeout(() => setAgentTyping(false), 3000);
-        return;
-      }
-      if (event.type === 'read') {
-        const updated = (event.messages || []).filter(m => m && typeof m.text === 'string');
-        if (updated.length > 0) applyMessages(updated as ChatMessage[]);
-        return;
-      }
-      const mine = (event.messages || []).filter(m => m && typeof m.text === 'string');
-      if (mine.length === 0) return;
-      const last = mine[mine.length - 1];
-      // Reading the open widget instantly flips the agent's ticks to blue.
-      if (last && last.from === 'admin' && openRef.current) markMyChatRead().catch(() => null);
-      applyMessages(mine as ChatMessage[]);
-    });
+    const identity = chatIdentity();
+    if (!identity.email) return;
+    (async () => {
+      const conv = await getOrCreateConversation(identity.email);
+      if (!conv) return;
+      subscribeToChat(identity.email, (event) => {
+        if (event.type === 'message') {
+          if (event.payload.conversation_id !== conv.id) return;
+          const m: ChatMessage = {
+            id: event.payload.id,
+            from: event.payload.from_role === 'admin' ? 'admin' : 'user',
+            text: event.payload.text,
+            time: new Date(event.payload.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            at: event.payload.created_at,
+            read: !!event.payload.read,
+          };
+          // Reading the open widget instantly flips the admin's ticks to blue.
+          if (m.from === 'admin' && openRef.current) markMyChatRead().catch(() => null);
+          setMessages(prev => {
+            const exists = prev.some(p => p.id === m.id);
+            if (exists) return prev;
+            return [...prev, m];
+          });
+          setUnreadBadge(false);
+          return;
+        }
+        if (event.type === 'read') {
+          setMessages(prev => prev.map(m => ({ ...m, read: true })));
+          return;
+        }
+      }, { conversationId: conv.id });
+    })();
     return () => { if (agentTypingTimer.current) window.clearTimeout(agentTypingTimer.current); closeChatStream(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedIn]);
@@ -353,6 +364,11 @@ export default function ChatWidget() {
               </div>
             )}
           </div>
+
+          {/* Safety notice */}
+          <p style={{ fontSize: '11px', color: '#6B7280', margin: '0 0 8px', fontFamily: 'IBM Plex Mono, monospace', textAlign: 'center', fontStyle: 'italic' }}>
+            Never share passwords, seed phrases or card details here.
+          </p>
 
           {/* The composer is always available: a customer can send as many
               messages as they like, in any order, and nothing ever times out. */}
