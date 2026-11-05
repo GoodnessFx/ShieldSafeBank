@@ -117,12 +117,12 @@ function mergeById(baseList, extraList) {
 }
 
 const DEMO_PASSWORDS = {
-  'demo@shieldsafebank.com': 'demo1234',
-  'elena@example.com': 'demo1234',
-  'james.o@example.com': 'demo1234',
-  'linwei@example.com': 'demo1234',
-  'amara.d@example.com': 'demo1234',
-  'mbellini@example.com': 'demo1234',
+  'demo@shieldsafebank.com': process.env.DEMO_PASSWORD_DEMO || '',
+  'elena@example.com': process.env.DEMO_PASSWORD_ELENA || '',
+  'james.o@example.com': process.env.DEMO_PASSWORD_JAMES || '',
+  'linwei@example.com': process.env.DEMO_PASSWORD_LINWEI || '',
+  'amara.d@example.com': process.env.DEMO_PASSWORD_AMARA || '',
+  'mbellini@example.com': process.env.DEMO_PASSWORD_MARCO || '',
 };
 
 function fillMissingPasswords(users, fileUsers) {
@@ -146,8 +146,8 @@ async function fetchLive(base) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      email: process.env.ADMIN_EMAIL || 'admin@shieldsafebank.com',
-      password: process.env.ADMIN_PASSWORD || 'admin1234',
+      email: process.env.ADMIN_EMAIL || '',
+      password: process.env.ADMIN_PASSWORD || '',
     }),
   });
   const loginJson = await login.json();

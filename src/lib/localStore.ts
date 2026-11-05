@@ -36,7 +36,6 @@ export interface StoreUser {
   cardLast4?: string;
   cardHolder?: string;
   cardExp?: string;
-  cardCvv?: string;
   cardStatus?: string;
   cardBrand?: string;
   dailyLimit?: string;
@@ -331,7 +330,7 @@ export function setUserProfile(email: string, profile: Partial<StoreUser>): Stor
     balance: 0,
     accountNumber: generateAccountNumber(),
   };
-  const keys = ['name', 'firstName', 'middleName', 'lastName', 'phone', 'dob', 'address', 'businessName', 'type', 'accountNumber', 'password', 'achBankName', 'achLast4', 'achRouting', 'achType', 'achAccountName', 'achAccountNumber', 'cardLast4', 'cardHolder', 'cardExp', 'cardCvv', 'cardStatus', 'cardBrand', 'dailyLimit'] as const;
+  const keys = ['name', 'firstName', 'middleName', 'lastName', 'phone', 'dob', 'address', 'businessName', 'type', 'accountNumber', 'password', 'achBankName', 'achLast4', 'achRouting', 'achType', 'achAccountName', 'achAccountNumber', 'cardLast4', 'cardHolder', 'cardExp', 'cardStatus', 'cardBrand', 'dailyLimit'] as const;
   for (const key of keys) {
     const v = profile[key];
     if (typeof v === 'string') (user as unknown as Record<string, string>)[key] = v;

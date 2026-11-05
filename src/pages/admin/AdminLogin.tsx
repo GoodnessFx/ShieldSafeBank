@@ -4,7 +4,7 @@ import { adminLogin } from '../../lib/api';
 import BrandMark from '../../components/BrandMark';
 
 export default function AdminLogin() {
-  const [email, setEmail] = useState('admin@shieldsafebank.com');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');

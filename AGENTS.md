@@ -39,8 +39,7 @@ Admins can reply to a single conversation or use **Reply to All** in the Chat
 Inbox to broadcast one message to every open thread
 (`POST /api/admin/threads/reply-all`).
 
-Admin console: `/xk9-admin-console-7f3a` (login `admin@shieldsafebank.com` /
-`admin1234`).
+Admin console: hidden route configured in PXXL environment (login via Supabase Auth with admin role).
 
 ## Development Server
 

@@ -1,6 +1,7 @@
 import { API_BASE, LOCAL_API_BASE } from './config';
 import { recordAuth, ensureAccount, setUserProfile, getUsers, getTransactions as getLocalTxs, addDeposit, addWithdrawal, currentEmail, approveKycQueueItem, deriveAchLast4, updateUserBanking } from './localStore';
 import { toAmount } from './format';
+import { supabase } from './supabase';
 
 interface ApiResult<T> {
   data: T | null;
@@ -143,7 +144,6 @@ export interface MeData {
   cardLast4?: string;
   cardHolder?: string;
   cardExp?: string;
-  cardCvv?: string;
   cardStatus?: string;
   cardBrand?: string;
   dailyLimit?: string;
@@ -352,7 +352,6 @@ export async function getMe() {
       cardLast4: pick(server && server.cardLast4, stored.cardLast4, '••••'),
       cardHolder: pick(server && server.cardHolder, stored.cardHolder, stored.name),
       cardExp: pick(server && server.cardExp, stored.cardExp, '12/28'),
-      cardCvv: pick(server && server.cardCvv, stored.cardCvv, '834'),
       cardStatus: pick(server && server.cardStatus, stored.cardStatus, 'Active'),
       cardBrand: pick(server && server.cardBrand, stored.cardBrand, 'Visa'),
       dailyLimit: pick(server && server.dailyLimit, stored.dailyLimit, '$5,000 / day'),
@@ -649,16 +648,23 @@ async function adminFetch<T>(path: string, opts?: { method?: string; body?: unkn
 }
 
 export async function adminLogin(email: string, password: string, totp = ''): Promise<ApiResult<AdminLoginResult>> {
-  const r = await adminFetch<{ token: string }>('/admin/login', { method: 'POST', body: { email, password, totp } });
-  if (r.ok && r.data?.token) setAdminToken(r.data.token, lastAdminBase || API_BASE);
-  if (!r.ok && r.offline) {
-    // No backend answered. Let the admin into the console in offline mode (it can
-    // still show this browser's data) but do NOT invent a token: a made-up token
-    // is rejected on every later call and caused the endless re-login loop.
-    markAdminSignedIn();
-    return { data: { token: '' }, ok: true, offline: true };
+  // Admin logs in through Supabase Auth only; the API verifies the admin JWT
+  // on every admin route via app_metadata.role = 'admin'.
+  if (!supabase) {
+    return { data: null, ok: false, offline: true };
   }
-  return r;
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error || !data || !data.user) {
+    return { data: null, ok: false, offline: false };
+  }
+  const appMeta = data.user.app_metadata || {};
+  if (appMeta.role !== 'admin') {
+    return { data: { error: 'Admin access required.' }, ok: false, offline: false };
+  }
+  // Store the Supabase access token as the admin token for API calls.
+  const token = data.access_token || '';
+  setAdminToken(token, API_BASE);
+  return { data: { token }, ok: true, offline: false };
 }
 
 export interface AdminUserData {
@@ -690,7 +696,6 @@ export interface AdminUserData {
   cardLast4?: string;
   cardHolder?: string;
   cardExp?: string;
-  cardCvv?: string;
   cardStatus?: string;
   cardBrand?: string;
   dailyLimit?: string;
@@ -850,7 +855,6 @@ export async function patchAdminUser(userId: string, profile: {
   cardLast4?: string;
   cardHolder?: string;
   cardExp?: string;
-  cardCvv?: string;
   cardStatus?: string;
   cardBrand?: string;
   dailyLimit?: string;

@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
+import { createClient } from '@supabase/supabase-js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createHmac, timingSafeEqual, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +24,28 @@ const pool = DATABASE_URL
     })
   : null;
 
+// Supabase (service role key for server-side writes; never sent to browser)
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabase = SUPABASE_URL && SUPABASE_SERVICE_KEY
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } })
+  : null;
+
+// CORS: only allow configured frontend origin(s)
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+const corsOptions = {
+  origin: ALLOWED_ORIGINS.length > 0
+    ? (origin, callback) => {
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) callback(null, true);
+        else callback(new Error(`Not allowed by CORS: ${origin}`));
+      }
+    : true,
+  credentials: true,
+};
+
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY, data JSONB NOT NULL);
@@ -43,12 +66,12 @@ const BANK_NAME = 'Shield Safe Bank';
 
 const SEED = {
   users: [
-    { id:'U001', email:'demo@shieldsafebank.com', password:'demo1234', name:'Demo User', type:'personal', status:'active', balance:17760.94, kycStatus:'approved', joined:'2025-08-10', emailVerified:true, totpEnabled:true },
-    { id:'U002', email:'elena@example.com', password:'demo1234', name:'Elena Vasquez', type:'personal', status:'active', balance:24380.00, kycStatus:'approved', joined:'2025-08-02', emailVerified:true, totpEnabled:true },
-    { id:'U003', email:'james.o@example.com', password:'demo1234', name:'James Okonkwo', type:'personal', status:'active', balance:7915.50, kycStatus:'approved', joined:'2025-08-14', emailVerified:true, totpEnabled:true },
-    { id:'U004', email:'linwei@example.com', password:'demo1234', name:'Lin Wei', type:'personal', status:'active', balance:0, kycStatus:'in_review', joined:'2025-09-11', emailVerified:true, totpEnabled:false },
-    { id:'U005', email:'amara.d@example.com', password:'demo1234', name:'Amara Diallo', type:'personal', status:'active', balance:3200.00, kycStatus:'approved', joined:'2025-09-01', emailVerified:true, totpEnabled:true },
-    { id:'U006', email:'mbellini@example.com', password:'demo1234', name:'Marco Bellini', type:'personal', status:'suspended', balance:0, kycStatus:'rejected', joined:'2025-08-20', emailVerified:true, totpEnabled:true },
+    { id:'U001', email:'demo@shieldsafebank.com', password:null, name:'Demo User', type:'personal', status:'active', balance:17760.94, kycStatus:'approved', joined:'2025-08-10', emailVerified:true, totpEnabled:true, data:{passwordMigrated:false,mustChangePassword:true} },
+    { id:'U002', email:'elena@example.com', password:null, name:'Elena Vasquez', type:'personal', status:'active', balance:24380.00, kycStatus:'approved', joined:'2025-08-02', emailVerified:true, totpEnabled:true, data:{passwordMigrated:false,mustChangePassword:true} },
+    { id:'U003', email:'james.o@example.com', password:null, name:'James Okonkwo', type:'personal', status:'active', balance:7915.50, kycStatus:'approved', joined:'2025-08-14', emailVerified:true, totpEnabled:true, data:{passwordMigrated:false,mustChangePassword:true} },
+    { id:'U004', email:'linwei@example.com', password:null, name:'Lin Wei', type:'personal', status:'active', balance:0, kycStatus:'in_review', joined:'2025-09-11', emailVerified:true, totpEnabled:false, data:{passwordMigrated:false,mustChangePassword:true} },
+    { id:'U005', email:'amara.d@example.com', password:null, name:'Amara Diallo', type:'personal', status:'active', balance:3200.00, kycStatus:'approved', joined:'2025-09-01', emailVerified:true, totpEnabled:true, data:{passwordMigrated:false,mustChangePassword:true} },
+    { id:'U006', email:'mbellini@example.com', password:null, name:'Marco Bellini', type:'personal', status:'suspended', balance:0, kycStatus:'rejected', joined:'2025-08-20', emailVerified:true, totpEnabled:true, data:{passwordMigrated:false,mustChangePassword:true} },
   ],
   transactions: [
     { id:'T001', userId:'U001', date:'2025-09-10', type:'deposit', asset:'BTC', amount:'0.25', rate:67842.50, usd:16875.83, status:'completed' },
@@ -276,7 +299,6 @@ function normalizeDB(db) {
     u.cardLast4 = u.cardLast4 || '';
     u.cardHolder = u.cardHolder || u.name || '';
     u.cardExp = u.cardExp || '';
-    u.cardCvv = u.cardCvv || '';
     u.cardStatus = u.cardStatus || 'Active';
     u.cardBrand = u.cardBrand || 'Visa';
     u.dailyLimit = u.dailyLimit || '$5,000 / day';
@@ -362,11 +384,13 @@ function saveDB(store) {
  * Tokens are now a keyed HMAC - of the user id, or of the fixed `admin` scope -
  * so they stay valid across restarts and redeploys with no server-side state.
  *
- * Demo caveat: the key is a constant in an app whose admin credentials are
- * already public (admin@shieldsafebank.com / admin1234). A real deployment should
+ * Demo caveat: the key is a constant. A real deployment should
  * read SESSION_SECRET from the environment and rotate it.
  */
-const SESSION_SECRET = process.env.SESSION_SECRET || 'shieldsafebank-demo-session-key-v1';
+const SESSION_SECRET = process.env.SESSION_SECRET || '';
+if (!SESSION_SECRET) {
+  console.warn('[security] SESSION_SECRET is not set — using fallback. Set SESSION_SECRET in production.');
+}
 
 /* ---------------------------------------------------------------------------
  * Resend email helper
@@ -495,6 +519,33 @@ function userIdFromToken(token) {
   const expected = Buffer.from(sign('user:' + id));
   if (given.length !== expected.length) return null;
   return timingSafeEqual(given, expected) ? id : null;
+}
+
+/** Verify a Supabase JWT and return the user's uuid, or null if invalid. */
+async function verifySupabaseJwt(token) {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data || !data.user) return null;
+    return data.user.id;
+  } catch {
+    return null;
+  }
+}
+
+/** Verify a Supabase JWT and confirm the user has the admin role. */
+async function verifySupabaseAdminJwt(token) {
+  const userId = await verifySupabaseJwt(token);
+  if (!userId) return null;
+  try {
+    const { data } = await supabase.auth.admin.getUserById(userId);
+    if (!data || !data.user) return null;
+    const appMeta = data.user.app_metadata || {};
+    if (appMeta.role !== 'admin') return null;
+    return userId;
+  } catch {
+    return null;
+  }
 }
 
 function nextId(db, type) {
@@ -661,7 +712,7 @@ function chatRateLimited(userId) {
  * ------------------------------------------------------------------------- */
 
 const app = express();
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ limit: '25mb', extended: true }));
 
@@ -702,35 +753,102 @@ app.put('/api/admin/tawk', adminMiddleware, (req, res) => {
   res.json({ ok: true, propertyId, widgetId });
 });
 
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) return res.status(401).json({ error:'Missing token' });
-  const userId = userIdFromToken(header.slice(7));
-  if (!userId) return res.status(401).json({ error:'Invalid token' });
-  req.user = db.users.find(u => u.id === userId);
-  if (!req.user) return res.status(401).json({ error:'User not found' });
-  next();
+  const token = header.slice(7);
+
+  // Try Supabase JWT first
+  const supabaseUserId = await verifySupabaseJwt(token);
+  if (supabaseUserId) {
+    const user = db.users.find(u => u.auth_id === supabaseUserId);
+    if (user) {
+      req.user = user;
+      req.user.supabaseUserId = supabaseUserId;
+      return next();
+    }
+    // User exists in Supabase Auth but not yet migrated to our store
+    return res.status(401).json({ error:'Account not yet migrated. Please log in again.' });
+  }
+
+  // Fall back to legacy HMAC token
+  const legacyUserId = userIdFromToken(token);
+  if (legacyUserId) {
+    const user = db.users.find(u => u.id === legacyUserId);
+    if (user) {
+      req.user = user;
+      return next();
+    }
+  }
+
+  return res.status(401).json({ error:'Invalid token' });
 }
 
-function adminMiddleware(req, res, next) {
+async function adminMiddleware(req, res, next) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) return res.status(401).json({ error:'Missing token' });
-  const given = Buffer.from(String(header.slice(7)));
-  const expected = Buffer.from(adminToken());
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
-    return res.status(401).json({ error:'Invalid admin token' });
+  const token = header.slice(7);
+
+  // Try Supabase admin JWT first
+  const supabaseAdminId = await verifySupabaseAdminJwt(token);
+  if (supabaseAdminId) {
+    const user = db.users.find(u => u.auth_id === supabaseAdminId);
+    if (user) {
+      req.user = user;
+      req.user.isAdmin = true;
+      return next();
+    }
   }
+
+  // Fall back to legacy HMAC admin token
+  const given = Buffer.from(String(token));
+  const expected = Buffer.from(adminToken());
+  if (given.length === expected.length && timingSafeEqual(given, expected)) {
+    req.user = { id: 'admin', email: 'admin@shieldsafebank.com', name: 'Admin', isAdmin: true, legacy: true };
+    return next();
+  }
+
+  return res.status(401).json({ error:'Invalid admin token' });
+}
+
+/** Verify Supabase JWT and confirm admin role. */
+async function supabaseAdminMiddleware(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) return res.status(401).json({ error:'Missing token' });
+  const token = header.slice(7);
+  const userId = await verifySupabaseAdminJwt(token);
+  if (!userId) return res.status(401).json({ error:'Invalid admin token' });
+  req.user = db.users.find(u => u.auth_id === userId);
+  if (!req.user) return res.status(401).json({ error:'Admin user not found' });
   next();
 }
 
 app.get('/api/rates', (_, res) => res.json({ BTC: 67842.50, USDT: 0.9998 }));
 
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   const { email, password, name, type, businessName, firstName, middleName, lastName, phone, dob, address } = req.body;
   if (!email || !password || !name) return res.status(400).json({ error:'Email, password, and name are required.' });
+  if (!supabase) return res.status(500).json({ error:'Auth service not configured.' });
   if (db.users.find(u => u.email === email)) return res.status(409).json({ error:'An account with this email already exists.' });
+
+  // Phase 10: Create Supabase Auth user directly
+  const { data: authData, error: createError } = await supabase.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: false,
+    user_metadata: { name, firstName, middleName, lastName, phone, dob, address, businessName },
+  });
+
+  if (createError) {
+    console.error('[register] Supabase user creation failed:', createError.message);
+    return res.status(500).json({ error: 'Account creation failed. Please try again.' });
+  }
+
+  const authUserId = authData.user.id;
+
+  // Create the users.data row (balance starts at 0, KYC pending)
   const user = {
-    id: nextId(db,'user'), email, password, name, type: type || 'personal',
+    id: nextId(db,'user'), email, password: null, name, type: type || 'personal',
     status:'active', balance:0, kycStatus:'pending', joined: new Date().toISOString().slice(0,10),
     emailVerified:false, totpEnabled:false,
     firstName: (firstName || '').trim(), middleName: (middleName || '').trim(),
@@ -740,26 +858,149 @@ app.post('/api/auth/register', (req, res) => {
     accountNumber: makeAccountNumber(),
     lastLogin: new Date().toISOString(),
     lastActiveAt: new Date().toISOString(),
+    auth_id: authUserId,
+    data: { auth_id: authUserId, passwordMigrated: true, mustChangePassword: false },
   };
   db.users.push(user);
   saveDB(db);
   recordActivityEvent(user, 'signup', { via: 'email' });
-  const token = userToken(user.id);
-  res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
+
+  res.json({
+    token: '',
+    supabaseUserId: authUserId,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      balance: user.balance,
+      kycStatus: user.kycStatus,
+      type: user.type,
+      accountNumber: user.accountNumber,
+      auth_id: authUserId,
+      mustChangePassword: false,
+    },
+  });
 });
 
-app.post('/api/auth/login', (req, res) => {
+/** Ensure a chat_conversations row exists for the given supabase user id. */
+async function ensureChatConversation(supabaseUserId) {
+  if (!supabase) return;
+  try {
+    const { data: existing } = await supabase
+      .from('chat_conversations')
+      .select('id')
+      .eq('user_id', supabaseUserId)
+      .maybeSingle();
+    if (existing) return;
+    const convId = `conv_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    await supabase
+      .from('chat_conversations')
+      .insert({ id: convId, user_id: supabaseUserId, status: 'open' });
+  } catch (err) {
+    console.error('[login] ensureChatConversation error:', err);
+  }
+}
+
+app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error:'Email and password are required.' });
+
   const user = db.users.find(u => u.email === email);
   if (!user) return res.status(401).json({ error:'Invalid credentials.' });
-  if (user.password !== password) return res.status(401).json({ error:'Invalid credentials.' });
   if (user.status === 'suspended') return res.status(403).json({ error:'Account is suspended.' });
+
+  // Phase 9: Users with empty password must use "Forgot password"
+  if (!user.password || user.password.length === 0) {
+    return res.status(401).json({ error:'Please use "Forgot password" to reset your password.' });
+  }
+
+  // Phase 8: If already migrated to Supabase Auth, direct them to Supabase login
+  if (user.data && user.data.passwordMigrated && user.auth_id) {
+    return res.status(401).json({ error:'Account has been migrated. Please sign in through Supabase Auth.' });
+  }
+
+  // Verify legacy password (plaintext comparison - the old server's method)
+  if (user.password !== password) return res.status(401).json({ error:'Invalid credentials.' });
+
+  // Phase 8: Migrate to Supabase Auth
+  if (supabase) {
+    try {
+      // Create the auth user via Supabase admin API
+      const { data: authData, error: createError } = await supabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: user.emailVerified === true,
+        user_metadata: { name: user.name, full_name: user.name },
+      });
+
+      if (createError && !createError.message.includes('already registered')) {
+        console.error('[login] Supabase user creation failed:', createError.message);
+        return res.status(500).json({ error:'Account migration failed. Please contact support.' });
+      }
+
+      let authUserId;
+      if (createError && createError.message.includes('already registered')) {
+        // Auth user already exists - try to sign in
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (signInError) {
+          return res.status(401).json({ error:'Invalid credentials.' });
+        }
+        authUserId = signInData.user.id;
+      } else {
+        authUserId = authData.user.id;
+      }
+
+      // Save auth_id to users.data and users.auth_id
+      user.auth_id = authUserId;
+      if (!user.data) user.data = {};
+      user.data.auth_id = authUserId;
+      user.data.passwordMigrated = true;
+      user.data.mustChangePassword = true;
+      user.data.password = null; // Remove plaintext password
+
+      user.lastLogin = new Date().toISOString();
+      user.lastActiveAt = user.lastLogin;
+      recordLoginEvent(user);
+      saveDB(db);
+
+      // Ensure a chat conversation exists for this user
+      await ensureChatConversation(authUserId);
+
+      // Return Supabase session
+      const { data: session } = await supabase.auth.signInWithPassword({ email, password });
+      res.json({
+        token: session?.access_token || '',
+        supabaseUserId: authUserId,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          balance: user.balance,
+          kycStatus: user.kycStatus,
+          type: user.type,
+          accountNumber: user.accountNumber,
+          auth_id: authUserId,
+          mustChangePassword: true,
+        },
+      });
+      return;
+    } catch (err) {
+      console.error('[login] Migration error:', err);
+      return res.status(500).json({ error:'Account migration failed. Please contact support.' });
+    }
+  }
+
+  // Legacy fallback (no Supabase configured)
+  if (user.password !== password) return res.status(401).json({ error:'Invalid credentials.' });
   const token = userToken(user.id);
   user.lastLogin = new Date().toISOString();
   user.lastActiveAt = user.lastLogin;
   recordLoginEvent(user);
   saveDB(db);
+  // Legacy users don't have Supabase auth uuids, so no chat_conversations row is created here.
   res.json({ token, user:{ id:user.id, email:user.email, name:user.name, balance:user.balance, kycStatus:user.kycStatus, type:user.type, accountNumber:user.accountNumber } });
 });
 
@@ -810,57 +1051,25 @@ app.post('/api/auth/google', async (req, res) => {
 
 app.post('/api/auth/forgot-password', async (req, res) => {
   const email = String((req.body && req.body.email) || '').trim().toLowerCase();
-  const user = email ? db.users.find(u => String(u.email).toLowerCase() === email) : null;
 
   // Always respond the same way for unknown emails (prevents email enumeration).
-  if (!user) {
-    return res.json({ ok: true, message: 'If an account exists, a reset link has been sent.' });
+  if (!email) return res.status(400).json({ error: 'Email is required.' });
+
+  if (!supabase) {
+    return res.status(500).json({ error: 'Auth service not configured.' });
   }
 
-  pruneTokens();
-  const token = randomBytes(32).toString('hex');
-  resetTokens.set(token, { userId: user.id, expiresAt: Date.now() + 30 * 60 * 1000 });
+  // Phase 10: Use Supabase Auth resetPasswordForEmail (sends reset email via Supabase)
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${(process.env.APP_URL || 'https://shieldsafebank.com').replace(/\/$/, '')}/reset-password`,
+  });
 
-  const appUrl = (process.env.APP_URL || 'https://shieldsafebank.com').replace(/\/$/, '');
-  const resetUrl = `${appUrl}/reset-password?token=${token}`;
-
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reset your password</title></head>
-<body style="margin:0;padding:0;background:#F4F6F8;font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F4F6F8;padding:40px 0;">
-    <tr><td align="center">
-      <table width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #DCE3EA;">
-        <tr><td style="background:#0A2044;padding:28px 40px;">
-          <span style="font-size:20px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">Shield Safe Bank</span>
-        </td></tr>
-        <tr><td style="padding:40px;">
-          <h1 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#0A2044;">Reset your password</h1>
-          <p style="margin:0 0 24px;font-size:15px;color:#4A5568;line-height:1.6;">Hi ${user.name || user.email},</p>
-          <p style="margin:0 0 24px;font-size:15px;color:#4A5568;line-height:1.6;">We received a request to reset the password for your Shield Safe Bank account. Click the button below to choose a new password.</p>
-          <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;"><tr><td style="background:#123C7C;">
-            <a href="${resetUrl}" style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;">Reset Password</a>
-          </td></tr></table>
-          <p style="margin:0 0 16px;font-size:13px;color:#6B7280;line-height:1.6;">Or paste this link in your browser:<br><a href="${resetUrl}" style="color:#123C7C;word-break:break-all;">${resetUrl}</a></p>
-          <p style="margin:0 0 0;font-size:13px;color:#9CA3AF;line-height:1.6;">This link expires in <strong>30 minutes</strong>. If you did not request a password reset, you can safely ignore this email — your password will not change.</p>
-        </td></tr>
-        <tr><td style="background:#F4F6F8;border-top:1px solid #DCE3EA;padding:20px 40px;font-size:12px;color:#9CA3AF;">
-          &copy; ${new Date().getFullYear()} Shield Safe Bank. All rights reserved.
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`;
-
-  const result = await sendMail({ to: user.email, subject: 'Reset your Shield Safe Bank password', html });
-  if (!result.ok) {
-    // Delete the token we stored — the link will never reach the user anyway.
-    resetTokens.delete(token);
-    return res.status(500).json({ error: result.error || 'Failed to send reset email. Please try again.' });
+  // Supabase does not reveal whether the email exists (prevents email enumeration).
+  if (error) {
+    console.error('[forgot-password] Supabase reset error:', error.message);
   }
 
-  recordActivityEvent(user, 'password_reset_requested', { via: 'email' });
+  recordActivityEvent({ email }, 'password_reset_requested', { via: 'email' });
   res.json({ ok: true, message: 'If an account exists, a reset link has been sent.' });
 });
 
@@ -989,7 +1198,7 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
     achType: u.achType || 'ACH',
     achAccountName: u.achAccountName || u.name || '',
     achAccountNumber: u.achAccountNumber || '',
-    cardLast4: u.cardLast4 || '', cardHolder: u.cardHolder || u.name || '', cardExp: u.cardExp || '', cardCvv: u.cardCvv || '',
+    cardLast4: u.cardLast4 || '', cardHolder: u.cardHolder || u.name || '', cardExp: u.cardExp || '',
     cardStatus: u.cardStatus || 'Active', cardBrand: u.cardBrand || 'Visa', dailyLimit: u.dailyLimit || '$5,000 / day',
   });
 });
@@ -1254,6 +1463,184 @@ app.get('/api/chat/presence', (_, res) => {
   res.json({ ok: true, agents, agentOnline: agents > 0, time: new Date().toISOString() });
 });
 
+// Phase 3: Get the signed-in user's conversation (create if none exists).
+app.get('/api/chat/conversations', authMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const userId = req.user.supabaseUserId || req.user.id;
+  const { data: existing } = await supabase
+    .from('chat_conversations')
+    .select('*')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existing) return res.json({ conversation: existing });
+  const convId = `conv_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const { data: created, error } = await supabase
+    .from('chat_conversations')
+    .insert({ id: convId, user_id: userId, status: 'open' })
+    .select()
+    .maybeSingle();
+  if (error) {
+    console.error('[chat] create conversation error:', error.message);
+    return res.status(500).json({ error: 'Failed to create conversation.' });
+  }
+  res.json({ conversation: created });
+});
+
+// Phase 3: Get messages for a conversation (customer only their own).
+app.get('/api/chat/conversations/:id/messages', authMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const conversationId = req.params.id;
+  const userId = req.user.supabaseUserId || req.user.id;
+  const { data: conv } = await supabase
+    .from('chat_conversations')
+    .select('id')
+    .eq('id', conversationId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!conv) return res.status(403).json({ error: 'Not your conversation.' });
+  const { data: messages, error } = await supabase
+    .from('chat_messages')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true });
+  if (error) {
+    console.error('[chat] fetch messages error:', error.message);
+    return res.status(500).json({ error: 'Failed to fetch messages.' });
+  }
+  res.json({ messages: messages || [] });
+});
+
+// Phase 3: Send a message to a conversation.
+app.post('/api/chat/conversations/:id/messages', authMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const conversationId = req.params.id;
+  const { text } = req.body || {};
+  const userId = req.user.supabaseUserId || req.user.id;
+  if (!text || text.trim().length === 0) return res.status(400).json({ error: 'Message cannot be empty.' });
+  if (text.length > 2000) return res.status(400).json({ error: 'Message is too long (max 2000 characters).' });
+  const { data: conv } = await supabase
+    .from('chat_conversations')
+    .select('*')
+    .eq('id', conversationId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!conv) return res.status(403).json({ error: 'Conversation not found.' });
+  const msgId = `msg_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const { data: created, error: msgError } = await supabase
+    .from('chat_messages')
+    .insert({ id: msgId, conversation_id: conversationId, from_role: 'user', text: text.trim(), read: false })
+    .select()
+    .maybeSingle();
+  if (msgError) {
+    console.error('[chat] send message error:', msgError.message);
+    return res.status(500).json({ error: 'Failed to send message.' });
+  }
+  await supabase
+    .from('chat_conversations')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('id', conversationId);
+  res.json({ ok: true, message: created });
+});
+
+// Phase 3: Mark messages in a conversation as read.
+app.post('/api/chat/conversations/:id/read', authMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const conversationId = req.params.id;
+  const userId = req.user.supabaseUserId || req.user.id;
+  const { data: conv } = await supabase
+    .from('chat_conversations')
+    .select('id')
+    .eq('id', conversationId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!conv) return res.status(403).json({ error: 'Conversation not found.' });
+  await supabase
+    .from('chat_messages')
+    .update({ read: true })
+    .eq('conversation_id', conversationId)
+    .eq('from_role', 'admin')
+    .eq('read', false);
+  res.json({ ok: true });
+});
+
+// Phase 3: Get all conversations (admin only).
+app.get('/api/admin/chat/conversations', supabaseAdminMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const { data: conversations, error } = await supabase
+    .from('chat_conversations')
+    .select('*')
+    .order('updated_at', { ascending: false });
+  if (error) {
+    console.error('[admin chat] fetch conversations error:', error.message);
+    return res.status(500).json({ error: 'Failed to fetch conversations.' });
+  }
+  res.json({ conversations: conversations || [] });
+});
+
+// Phase 3: Get messages for a conversation (admin).
+app.get('/api/admin/chat/conversations/:id/messages', supabaseAdminMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const conversationId = req.params.id;
+  const { data: messages, error } = await supabase
+    .from('chat_messages')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true });
+  if (error) {
+    console.error('[admin chat] fetch messages error:', error.message);
+    return res.status(500).json({ error: 'Failed to fetch messages.' });
+  }
+  res.json({ messages: messages || [] });
+});
+
+// Phase 3: Admin reply to a conversation.
+app.post('/api/admin/chat/conversations/:id/messages', supabaseAdminMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const conversationId = req.params.id;
+  const { text } = req.body || {};
+  if (!text || text.trim().length === 0) return res.status(400).json({ error: 'Message cannot be empty.' });
+  if (text.length > 2000) return res.status(400).json({ error: 'Message is too long (max 2000 characters).' });
+  const msgId = `msg_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const { data: created, error } = await supabase
+    .from('chat_messages')
+    .insert({ id: msgId, conversation_id: conversationId, from_role: 'admin', text: text.trim(), read: false })
+    .select()
+    .maybeSingle();
+  if (error) {
+    console.error('[admin chat] send message error:', error.message);
+    return res.status(500).json({ error: 'Failed to send message.' });
+  }
+  await supabase
+    .from('chat_conversations')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('id', conversationId);
+  res.json({ ok: true, message: created });
+});
+
+// Phase 3: Close a conversation (admin).
+app.post('/api/admin/chat/conversations/:id/close', supabaseAdminMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const conversationId = req.params.id;
+  await supabase
+    .from('chat_conversations')
+    .update({ status: 'closed', updated_at: new Date().toISOString() })
+    .eq('id', conversationId);
+  res.json({ ok: true });
+});
+
+// Phase 3: Reopen a conversation (admin).
+app.post('/api/admin/chat/conversations/:id/reopen', supabaseAdminMiddleware, async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Database not configured.' });
+  const conversationId = req.params.id;
+  await supabase
+    .from('chat_conversations')
+    .update({ status: 'open', updated_at: new Date().toISOString() })
+    .eq('id', conversationId);
+  res.json({ ok: true });
+});
+
 app.get('/api/admin/users', adminMiddleware, (_, res) => {
   const users = db.users.map(u => ({
     id:u.id, name:u.name, email:u.email, accountNumber:u.accountNumber,
@@ -1274,7 +1661,6 @@ app.get('/api/admin/users', adminMiddleware, (_, res) => {
     cardLast4: u.cardLast4 || '',
     cardHolder: u.cardHolder || u.name || '',
     cardExp: u.cardExp || '',
-    cardCvv: u.cardCvv || '',
     cardStatus: u.cardStatus || 'Active',
     cardBrand: u.cardBrand || 'Visa',
     dailyLimit: u.dailyLimit || '$5,000 / day',
@@ -1547,7 +1933,6 @@ app.patch('/api/admin/users/:id', adminMiddleware, async (req, res) => {
   if (typeof body.cardLast4 === 'string') user.cardLast4 = body.cardLast4.trim();
   if (typeof body.cardHolder === 'string') user.cardHolder = body.cardHolder.trim();
   if (typeof body.cardExp === 'string') user.cardExp = body.cardExp.trim();
-  if (typeof body.cardCvv === 'string') user.cardCvv = body.cardCvv.trim();
   if (typeof body.cardStatus === 'string') user.cardStatus = body.cardStatus.trim();
   if (typeof body.cardBrand === 'string') user.cardBrand = body.cardBrand.trim();
   if (typeof body.dailyLimit === 'string') user.dailyLimit = body.dailyLimit.trim();
@@ -1588,7 +1973,7 @@ app.patch('/api/admin/users/:id', adminMiddleware, async (req, res) => {
       achType: user.achType || 'ACH',
       achAccountName: user.achAccountName || user.name || '',
       achAccountNumber: user.achAccountNumber || '',
-      cardLast4: user.cardLast4 || '', cardHolder: user.cardHolder || user.name || '', cardExp: user.cardExp || '', cardCvv: user.cardCvv || '',
+      cardLast4: user.cardLast4 || '', cardHolder: user.cardHolder || user.name || '', cardExp: user.cardExp || '',
       cardStatus: user.cardStatus || 'Active', cardBrand: user.cardBrand || 'Visa', dailyLimit: user.dailyLimit || '$5,000 / day',
     }
   });
@@ -1696,49 +2081,81 @@ app.delete('/api/admin/users/:id/card-tracking', adminMiddleware, (req, res) => 
   res.json({ ok: true });
 });
 
-app.post('/api/admin/login', (req, res) => {
+app.post('/api/admin/login', async (req, res) => {
   const { email, password } = req.body;
-  if (email === 'admin@shieldsafebank.com' && password === 'admin1234') {
-    const token = adminToken();
-    return res.json({ token });
+  if (!email || !password) return res.status(400).json({ error:'Email and password are required.' });
+  if (!supabase) return res.status(500).json({ error:'Auth service not configured.' });
+
+  // Sign in via Supabase Auth
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error || !data || !data.user) {
+    return res.status(401).json({ error:'Invalid admin credentials.' });
   }
-  res.status(401).json({ error:'Invalid admin credentials.' });
+
+  // Confirm admin role
+  const appMeta = data.user.app_metadata || {};
+  if (appMeta.role !== 'admin') {
+    return res.status(403).json({ error:'Admin access required.' });
+  }
+
+  // Find or create the admin user record in our store
+  let adminUser = db.users.find(u => u.email === email);
+  if (!adminUser) {
+    adminUser = {
+      id: nextId(db, 'user'),
+      email,
+      password: null,
+      name: email,
+      type: 'personal',
+      status: 'active',
+      balance: 0,
+      kycStatus: 'approved',
+      joined: new Date().toISOString().slice(0, 10),
+      emailVerified: true,
+      totpEnabled: false,
+      auth_id: data.user.id,
+      data: { auth_id: data.user.id, passwordMigrated: true, mustChangePassword: false },
+    };
+    db.users.push(adminUser);
+    saveDB(db);
+  } else if (!adminUser.auth_id) {
+    adminUser.auth_id = data.user.id;
+    if (!adminUser.data) adminUser.data = {};
+    adminUser.data.auth_id = data.user.id;
+    saveDB(db);
+  }
+
+  res.json({
+    token: data.access_token,
+    supabaseUserId: data.user.id,
+    user: {
+      id: adminUser.id,
+      email: adminUser.email,
+      name: adminUser.name,
+      role: 'admin',
+    },
+  });
 });
 
 let server;
-/** Admin-requested starter account. The signup for this email never reached
- * the shared store, so the server guarantees it exists on every boot — the
- * admin can then fix the details (name, password, balance) from the panel. */
-function ensureSeedAccount() {
-  const email = 'jordynwatson2007@yahoo.com';
-  let user = db.users.find(u => String(u.email).toLowerCase() === email);
-  if (user) return;
-  user = {
-    id: nextId(db, 'user'), email, password: 'Jordyn2027', name: 'Jordyn Watson',
-    type: 'personal', status: 'active', balance: 0, kycStatus: 'approved',
-    joined: new Date().toISOString().slice(0, 10), emailVerified: true, totpEnabled: false,
-    firstName: 'Jordyn', lastName: 'Watson', phone: '', dob: '', address: '', businessName: '',
-    accountNumber: makeAccountNumber(),
-    lastLogin: '', lastActiveAt: '',
-  };
-  db.users.push(user);
-  saveDB(db);
-  recordActivityEvent(user, 'signup', { via: 'admin', note: 'Account provisioned by the bank (admin request)' });
-  console.log(`  Seeded account ${email} (password Jordyn2027)`);
-}
 
 async function main() {
+  // Refuse to start if required environment variables are missing.
+  const requiredEnv = ['DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SESSION_SECRET'];
+  const missing = requiredEnv.filter(v => !process.env[v]);
+  if (missing.length > 0) {
+    console.error(`Missing required environment variables: ${missing.join(', ')}`);
+    process.exit(1);
+  }
   db = await loadDB();
-  ensureSeedAccount();
   // One email = one chat: merge any stray duplicate conversations that built up
   // in earlier versions so the admin inbox never shows two chats for one person.
   const removed = dedupeThreads(db);
   if (removed > 0) { console.log(`  Merged ${removed} duplicate chat thread(s).`); await saveDB(db); }
   server = app.listen(PORT, () => {
-    console.log(`\n  Shield Safe Bank demo server running on http://localhost:${PORT}\n`);
+    console.log(`\n  Shield Safe Bank server running on http://localhost:${PORT}\n`);
     console.log(`  Storage: ${pool ? 'Postgres (DATABASE_URL)' : 'local store.json'}`);
-    console.log(`  Demo login:  demo@shieldsafebank.com / demo1234`);
-    console.log(`  Admin login: admin@shieldsafebank.com / admin1234\n`);
+    console.log(`  Supabase: ${supabase ? 'connected' : 'not configured'}\n`);
   });
 }
 main().catch(err => {
