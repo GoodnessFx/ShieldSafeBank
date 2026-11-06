@@ -9,9 +9,10 @@ const adminToken = createHmac('sha256', SECRET).update('admin').digest('hex');
 const PASS = 'ShieldSafe#2026';
 
 const users = [
-  { email: 'Combsholly88@gmail.com', name: 'Holly Combs', balance: 7500 },
+  { email: 'Combsholly88@gmail.com', name: 'Holly Combs', balance: 9000 },
   { email: 'sandim2011@gmail.com', name: 'Sandra Magallanes', balance: 60000 },
-  { email: 'timothy.watson@example.com', name: 'Timothy Watson', balance: 74900000 },
+  { email: 'melimari88@gmail.com', name: 'Meli Mari', balance: 10000 },
+  { email: 'Loosegun@proton.me', name: 'Loosegun', balance: 980000 },
 ].map(u => ({ ...u, loginEmail: u.email.toLowerCase() }));
 
 async function req(path, { method = 'GET', token, body } = {}) {
