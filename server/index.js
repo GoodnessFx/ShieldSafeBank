@@ -2178,9 +2178,11 @@ async function main() {
   // Refuse to start if required environment variables are missing.
   const requiredEnv = ['DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SESSION_SECRET'];
   const missing = requiredEnv.filter(v => !process.env[v]);
-  if (missing.length > 0) {
+  if (missing.length > 0 && process.env.SSB_DEV !== '1') {
     console.error(`Missing required environment variables: ${missing.join(', ')}`);
     process.exit(1);
+  } else if (missing.length > 0) {
+    console.warn(`[dev] SSB_DEV=1 — running without: ${missing.join(', ')} (local file store, no Supabase).`);
   }
   db = await loadDB();
   // One email = one chat: merge any stray duplicate conversations that built up

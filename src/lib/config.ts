@@ -24,11 +24,10 @@ export const GOOGLE_CLIENT_ID = '24300395823-ahbmo1pjkvnchlobe1gmf0em88mhmjgt.ap
  * Without a reachable backend the app falls back to per-browser storage, which
  * is why chats from other devices would not be visible.
  */
-const HOSTED_API_BASE = 'https://shieldsafebank-api.onrender.com/api';
 const envBase = (import.meta.env?.VITE_API_BASE as string | undefined)?.replace(/\/$/, '');
 const isLocalHost = typeof window !== 'undefined'
   && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
-export const API_BASE = envBase || (isLocalHost ? '/api' : HOSTED_API_BASE);
+export const API_BASE = envBase || (isLocalHost ? '/api' : '');
 
 /**
  * Fallback base URL for the local shared server (port 4000).
