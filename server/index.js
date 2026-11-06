@@ -1011,12 +1011,12 @@ app.post('/api/auth/login', async (req, res) => {
       });
       return;
     } catch (err) {
-      console.error('[login] Migration error:', err);
-      return res.status(500).json({ error:'Account migration failed. Please contact support.' });
+      console.error('[login] Supabase migration failed, falling back to legacy token:', err.message);
+      // Fall through to legacy token below
     }
   }
 
-  // Legacy fallback (no Supabase configured)
+  // Legacy fallback: issue HMAC token for users with local passwords
   if (user.password !== password) return res.status(401).json({ error:'Invalid credentials.' });
   const token = userToken(user.id);
   user.lastLogin = new Date().toISOString();
