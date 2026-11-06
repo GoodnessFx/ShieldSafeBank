@@ -27,7 +27,11 @@ export const GOOGLE_CLIENT_ID = '24300395823-ahbmo1pjkvnchlobe1gmf0em88mhmjgt.ap
 const envBase = (import.meta.env?.VITE_API_BASE as string | undefined)?.replace(/\/$/, '');
 const isLocalHost = typeof window !== 'undefined'
   && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
-export const API_BASE = envBase || (isLocalHost ? '/api' : '');
+// Default to '/api' so Vite's proxy works locally and the app never sends
+// requests to a non-existent path on a static host.
+// On a real deployment set VITE_API_BASE to your backend URL, e.g.:
+//   VITE_API_BASE=https://api.shieldsafebank.pxxl.pro
+export const API_BASE = envBase || '/api';
 
 /**
  * Fallback base URL for the local shared server (port 4000).

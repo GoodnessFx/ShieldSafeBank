@@ -647,24 +647,30 @@ async function adminFetch<T>(path: string, opts?: { method?: string; body?: unkn
   return second;
 }
 
-export async function adminLogin(email: string, password: string, totp = ''): Promise<ApiResult<AdminLoginResult>> {
-  // Admin logs in through Supabase Auth only; the API verifies the admin JWT
-  // on every admin route via app_metadata.role = 'admin'.
-  if (!supabase) {
-    return { data: null, ok: false, offline: true };
+export async function adminLogin(email: string, password: string, _totp = ''): Promise<ApiResult<AdminLoginResult>> {
+  // Try the server's own admin login endpoint first (works with or without Supabase).
+  // The server's /api/admin/login handles both: Supabase Auth (when configured)
+  // and a direct email/password check against the admin store.
+  const r = await tryFetch<{ token?: string; error?: string }>(
+    API_BASE, '/admin/login', null, () => {}, { method: 'POST', body: { email, password } }
+  );
+  if (r.ok && r.data?.token) {
+    const base = API_BASE;
+    setAdminToken(r.data.token, base);
+    return { data: { token: r.data.token }, ok: true, offline: false };
   }
+  if (!r.ok && !r.offline) {
+    return { data: r.data as AdminLoginResult, ok: false, offline: false };
+  }
+  // Server unreachable — try Supabase directly if configured.
+  if (!supabase) return { data: null, ok: false, offline: true };
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error || !data || !data.user) {
-    return { data: null, ok: false, offline: false };
-  }
+  if (error || !data?.user) return { data: null, ok: false, offline: false };
   const appMeta = data.user.app_metadata || {};
-  if (appMeta.role !== 'admin') {
-    return { data: { error: 'Admin access required.' }, ok: false, offline: false };
-  }
-  // Store the Supabase access token as the admin token for API calls.
-  const token = data.access_token || '';
-  setAdminToken(token, API_BASE);
-  return { data: { token }, ok: true, offline: false };
+  if (appMeta.role !== 'admin') return { data: { error: 'Admin access required.' }, ok: false, offline: false };
+  const tok = data.access_token || '';
+  setAdminToken(tok, API_BASE);
+  return { data: { token: tok }, ok: true, offline: false };
 }
 
 export interface AdminUserData {
