@@ -281,6 +281,40 @@ function fallbackSignedInEmail(): string {
 }
 
 export async function getMe() {
+  // Static user (no backend needed) — read from localStorage set at login.
+  try {
+    const raw = localStorage.getItem('ssb_static_user');
+    if (raw) {
+      const u = JSON.parse(raw);
+      if (u && u.email && typeof u.balance === 'number') {
+        return {
+          data: {
+            id: 'static',
+            email: u.email,
+            name: u.name || u.email,
+            balance: u.balance,
+            kycStatus: u.kycStatus || 'approved',
+            type: u.type || 'personal',
+            status: 'active',
+            joined: u.joined || '',
+            emailVerified: true,
+            accountNumber: u.accountNumber || '',
+            firstName: '', middleName: '', lastName: '',
+            phone: '', dob: '', address: '', businessName: '',
+            achBankName: 'Bank', achLast4: '', achRouting: '021000021',
+            achType: 'ACH', achAccountName: u.name || '',
+            achAccountNumber: '',
+            cardLast4: '', cardHolder: u.name || '', cardExp: '',
+            cardStatus: 'Active', cardBrand: 'Visa',
+            dailyLimit: '$5,000 / day',
+          } as MeData,
+          ok: true,
+          offline: false,
+        };
+      }
+    }
+  } catch { /* fall through to API */ }
+
   const r = await apiFetch<MeData>('/auth/me');
   const server = r.ok && r.data ? r.data : null;
 

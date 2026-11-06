@@ -302,6 +302,7 @@ export default function Dashboard() {
     localStorage.removeItem('ssb_auth');
     localStorage.removeItem('ssb_token');
     localStorage.removeItem('ssb_local_user');
+    localStorage.removeItem('ssb_static_user');
     nav('/');
   }
 
