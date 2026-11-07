@@ -1241,7 +1241,7 @@ export default function AdminConsole() {
         <div style={{ background: '#064E3B', borderBottom: '1px solid #10B981', padding: '8px 24px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#A7F3D0', textAlign: 'center', letterSpacing: '0.02em' }}>
           ● Shared server connected — showing everyone and everything from all devices.
         </div>
-      ) : authStale ? (
+      ) : authStale && !localStorage.getItem('ssb_admin_static') ? (
         <div style={{ background: '#7C4A03', borderBottom: '1px solid #F59E0B', padding: '10px 24px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#FDE68A', textAlign: 'center' }}>
            Admin sign-in required — the shared server is connected, but this browser needs to sign in to reply, verify customers and set balances.{' '}
           <button onClick={logout} style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', fontWeight: 700, color: '#0A2044', background: '#FDE68A', border: 'none', padding: '4px 12px', cursor: 'pointer' }}>
