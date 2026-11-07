@@ -452,13 +452,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Demo notice */}
-          <div style={{ background: '#FEF3C7', border: '1px solid #D97706', padding: '16px', marginBottom: '24px', borderRadius: '6px' }}>
-            <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '12px', color: '#92400E', margin: 0, fontWeight: 600 }}>
-              ⚠ Demo, no real funds — this is a demonstration environment only
-            </p>
-          </div>
-
           {/* Profile details — collected at sign-up, editable here, visible to the admin */}
           <div id="profile" style={{ background: '#fff', border: '1px solid #DCE3EA', padding: '28px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap', marginBottom: '18px' }}>

@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { getUsers, getActivity, getThreads, getThreadMessages, pushChatMessage, markThreadRead, markLocalUserVerified, getKycQueue, updateUserBalance, removeThread, setUserProfile, deriveAchLast4, updateUserBanking, type ChatMessage, type StoreUser, type ActivityEvent, type KycItem, type ChatAttachment } from '../../lib/localStore';
 import { decideKyc, getAdminKyc, getAdminUsers, setAdminUserBalance, patchAdminUser, createAdminUser, getAdminThreads, getAdminMessages, getTawkConfig, replyThread, replyToAll, saveAdminTawk, markAdminThreadRead, adminLogout, hasAdminToken, verifyAdminUser, pingAdminServer, adminAuthExpired, getAdminToken, sendAdminTyping, deleteAdminThread, getAdminUserLogins, getAdminActivity, getAdminCardTracking, updateAdminCardTracking, deleteAdminCardTracking, type AdminLoginEvent, type CardTrackingData } from '../../lib/api';
+import { getAllStaticUsers, updateStaticUser } from '../../lib/staticUsers';
 import CardTracking, { TRACKING_STEPS } from '../../components/CardTracking';
 import { subscribeToChat, closeChatStream } from '../../lib/chatTransport';
 import { fmtDateTime } from '../../lib/format';
@@ -356,6 +357,38 @@ export default function AdminConsole() {
   }
 
   async function reload() {
+    // Static users (always present, no backend needed)
+    const staticRows: AdminUserRow[] = getAllStaticUsers().map(u => ({
+      email: u.email,
+      name: u.name,
+      joined: u.joined || '',
+      lastLogin: '',
+      lastActiveAt: '',
+      status: 'verified' as const,
+      balance: u.balance,
+      accountNumber: u.accountNumber || '',
+      password: u.password || '',
+      firstName: u.firstName || '',
+      middleName: '',
+      lastName: u.lastName || '',
+      phone: u.phone || '',
+      dob: '',
+      address: u.address || '',
+      businessName: '',
+      achBankName: u.achBankName || 'Bank',
+      achLast4: u.achLast4 || '',
+      achRouting: u.achRouting || '021000021',
+      achType: u.achType || 'ACH',
+      achAccountName: u.achAccountName || u.name || '',
+      achAccountNumber: u.achAccountNumber || '',
+      cardLast4: u.cardLast4 || '',
+      cardHolder: u.cardHolder || u.name || '',
+      cardExp: u.cardExp || '12/28',
+      cardStatus: u.cardStatus || 'Active',
+      cardBrand: u.cardBrand || 'Visa',
+      dailyLimit: u.dailyLimit || '$5,000 / day',
+    }));
+
     // Everyone who has signed up locally, combined with anyone stored on the
     // server. Local accounts win on a matching email; server accounts are the
     // only ones with a serverId so an admin edit can also apply server-side.
@@ -410,6 +443,9 @@ export default function AdminConsole() {
     // Refuse to paint the local-thread fallback while unauthenticated: it is
     // what makes a perfectly-healthy admin panel look like a dead one.
     const byEmail = new Map<string, AdminUserRow>();
+    // Static users are always present — seed the map first so they show even
+    // when the server is offline and localStorage is empty.
+    for (const s of staticRows) byEmail.set(s.email.toLowerCase(), s);
     for (const r of remote) byEmail.set(r.email.toLowerCase(), r);
     for (const l of local) {
       const key = l.email.toLowerCase();
@@ -749,8 +785,8 @@ export default function AdminConsole() {
 
   function saveBalance(u: AdminUserRow, val: number) {
     if (isNaN(val) || val < 0) return;
-    // Persist to the shared server first (visible to every admin browser), then
-    // keep a local copy too so offline/browser-only accounts still work.
+    // Persist to static store (the four hardcoded users), shared server, and local store.
+    updateStaticUser(u.email, { balance: val });
     if (u.serverId) setAdminUserBalance(u.serverId, val).catch(() => null);
     updateUserBalance(u.email, val);
     reload();
@@ -881,6 +917,25 @@ export default function AdminConsole() {
     if (!isNaN(parsedBal) && parsedBal >= 0) {
       setBalance(u.email, parsedBal);
     }
+    // Also persist to the static hardcoded user store so the 4 main users always reflect edits.
+    updateStaticUser(u.email, {
+      name: payload.name,
+      phone: payload.phone,
+      accountNumber: payload.accountNumber,
+      achBankName: payload.achBankName,
+      achLast4: payload.achLast4,
+      achRouting: payload.achRouting,
+      achType: payload.achType,
+      achAccountName: payload.achAccountName,
+      achAccountNumber: payload.achAccountNumber,
+      cardLast4: payload.cardLast4,
+      cardHolder: payload.cardHolder,
+      cardExp: payload.cardExp,
+      cardStatus: payload.cardStatus,
+      cardBrand: payload.cardBrand,
+      dailyLimit: payload.dailyLimit,
+      ...(parsedBal >= 0 && !isNaN(parsedBal) ? { balance: parsedBal } : {}),
+    });
 
     if (bankEditCardLast4.trim()) {
       const sc = readCardScan(u.email) || { front: true, back: true, last4: '', holderName: '', scannedAt: '' };

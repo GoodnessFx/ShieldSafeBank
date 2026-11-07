@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { adminLogin } from '../../lib/api';
+import { staticAdminLogin } from '../../lib/staticUsers';
 import BrandMark from '../../components/BrandMark';
+
+const ADMIN_SESSION_KEY = 'ssb_admin_static';
 
 export default function AdminLogin() {
   const [email, setEmail] = useState('');
@@ -14,14 +16,21 @@ export default function AdminLogin() {
     e.preventDefault();
     setError('');
     setLoading(true);
-    adminLogin(email, password).then(r => {
-      if (!r.ok) { setLoading(false); setError(r.data && r.data.error ? r.data.error : 'Invalid admin credentials.'); return; }
+
+    const admin = staticAdminLogin(email, password);
+    if (!admin) {
       setLoading(false);
-      nav('/xk9-admin-console-7f3a/console');
-    }).catch(() => {
-      setLoading(false);
-      setError('Unable to connect. Please check your internet and try again.');
-    });
+      setError('Invalid admin credentials.');
+      return;
+    }
+
+    localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(admin));
+    localStorage.setItem('ssb_admin', '1');
+    // Store a dummy token so hasAdminToken() returns true and existing
+    // admin console polling code treats the session as authenticated.
+    localStorage.setItem('ssb_admin_token', 'static-admin');
+    setLoading(false);
+    nav('/xk9-admin-console-7f3a/console');
   }
 
   return (
@@ -44,11 +53,20 @@ export default function AdminLogin() {
               {loading ? 'SIGNING IN…' : 'LOG IN'}
             </button>
           </form>
+          <div style={{ marginTop: '20px', padding: '12px', background: 'rgba(71,121,196,0.1)', border: '1px solid rgba(71,121,196,0.3)' }}>
+            <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: '#4779C4', margin: '0 0 4px', letterSpacing: '0.06em' }}>ADMIN CREDENTIALS</p>
+            <p style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '11px', color: '#A9C6E8', margin: 0, lineHeight: 1.7 }}>
+              admin@shieldsafebank.com<br />
+              Admin#Shield2026
+            </p>
+          </div>
         </div>
       </div>
     </div>
   );
 }
+
+export { ADMIN_SESSION_KEY };
 
 function AField({ label, type, value, onChange, autoComplete }: {
   label: string; type: string; value: string; onChange: (v: string) => void; autoComplete?: string;
